@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Stonies</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css" />
+  <style>
+    body { background-color: #f5f5f5; }
+    .hero { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); }
+    .song-row td { vertical-align: middle; }
+    .song-thumb { width: 40px; height: 40px; object-fit: cover; border-radius: 4px; }
+    .spin {
+      animation: spin 1s linear infinite;
+      display: inline-block;
+    }
+    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    .upload-form { border-top: 1px solid #dbdbdb; margin-top: 1rem; padding-top: 1rem; }
+  </style>
+</head>
+<body>
+  <div id="app">
+
+    <!-- Header -->
+    <section class="hero is-dark mb-5">
+      <div class="hero-body">
+        <div class="container">
+          <div class="level">
+            <div class="level-left">
+              <div>
+                <p class="title">Stonies</p>
+                <p class="subtitle">NFC-triggered Chromecast music player</p>
+              </div>
+            </div>
+            <div class="level-right">
+              <span
+                class="tag is-medium"
+                :class="nfcBadgeClass"
+                :title="nfcStatus.hw_error || ''"
+              >
+                <span v-if="nfcStatus.mode === 'writing'" class="spin mr-1">⟳</span>
+                {{ nfcBadgeLabel }}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="container" style="max-width: 860px;">
+
+      <!-- Offline mode toggle -->
+      <div class="mb-4">
+        <button
+          class="button is-fullwidth is-medium"
+          :class="nfcStatus.offline ? 'is-warning' : 'is-light'"
+          @click="toggleOffline"
+          :disabled="nfcStatus.mode === 'writing'"
+        >
+          {{ nfcStatus.offline ? '📴 Offline Mode — tap to go Online' : '🟢 Online — tap to go Offline' }}
+        </button>
+      </div>
+
+      <!-- Offline last-seen banner -->
+      <div v-if="nfcStatus.offline && nfcStatus.last_seen_song" class="notification is-warning is-light mb-4">
+        <strong>Tag detected (not casting):</strong>
+        <span v-if="nfcStatus.last_seen_song.image_url">
+          <img :src="nfcStatus.last_seen_song.image_url" style="width:24px;height:24px;object-fit:cover;border-radius:3px;vertical-align:middle;margin: 0 6px;" />
+        </span>
+        {{ nfcStatus.last_seen_song.name }}
+        <small class="has-text-grey ml-2">({{ nfcStatus.last_seen_song.id }})</small>
+      </div>
+
+      <!-- NFC status banner (visible when writing) -->
+      <div v-if="nfcStatus.mode === 'writing' || nfcBannerDismissed === false && nfcStatus.sub_state === 'success'" class="notification mb-4" :class="nfcBannerClass">
+        <button class="delete" @click="dismissNfcBanner"></button>
+        <span v-if="nfcStatus.sub_state === 'waiting_for_tag'">
+          <span class="spin">⟳</span> Touch the sticker now to write the tag...
+        </span>
+        <span v-else-if="nfcStatus.sub_state === 'writing_tag'">
+          <span class="spin">⟳</span> Writing to tag...
+        </span>
+        <span v-else-if="nfcStatus.sub_state === 'success'">
+          Tag written! Song added and ready to play.
+          <span v-if="successCountdown > 0"> Returning to listening in {{ successCountdown }}s...</span>
+        </span>
+        <span v-else-if="nfcStatus.sub_state === 'error'">
+          Write failed: {{ nfcStatus.error }}
+          <button class="button is-small is-white ml-3" @click="cancelWrite">Cancel</button>
+        </span>
+        <span v-else-if="nfcStatus.mode === 'writing'">
+          <span class="spin">⟳</span> Preparing write...
+        </span>
+      </div>
+
+      <!-- Speaker box -->
+      <div class="box mb-4">
+        <h2 class="title is-5 mb-3">Speaker</h2>
+        <div class="field has-addons mb-2">
+          <div class="control is-expanded">
+            <div class="select is-fullwidth" :class="{'is-loading': loadingSpeakers}">
+              <select v-model="selectedSpeaker" :disabled="loadingSpeakers || speakers.length === 0">
+                <option value="" disabled>
+                  {{ loadingSpeakers ? 'Scanning network...' : speakers.length === 0 ? 'No speakers found' : 'Select a speaker' }}
+                </option>
+                <option v-for="s in speakers" :key="s" :value="s">{{ s }}</option>
+              </select>
+            </div>
+          </div>
+          <div class="control">
+            <button class="button is-light" @click="loadSpeakers" :disabled="loadingSpeakers" title="Refresh speakers">
+              <span :class="loadingSpeakers ? 'spin' : ''">⟳</span>
+            </button>
+          </div>
+          <div class="control">
+            <button class="button is-info" @click="saveSpeaker" :disabled="!selectedSpeaker || savingSpeaker">
+              {{ savingSpeaker ? 'Saving...' : 'Save' }}
+            </button>
+          </div>
+        </div>
+        <p v-if="savedSpeaker" class="help is-success">Saved: {{ savedSpeaker }}</p>
+        <p v-if="speakerError" class="help is-danger">{{ speakerError }}</p>
+      </div>
+
+      <!-- Song library box -->
+      <div class="box">
+        <div class="level mb-4">
+          <div class="level-left">
+            <h2 class="title is-5 mb-0">Song Library</h2>
+          </div>
+          <div class="level-right">
+            <button class="button is-primary is-small" @click="showUpload = !showUpload">
+              {{ showUpload ? 'Cancel' : '+ Add Song' }}
+            </button>
+          </div>
+        </div>
+
+        <!-- Upload form -->
+        <div v-if="showUpload" class="upload-form mb-4">
+          <div class="field">
+            <label class="label">Song Name</label>
+            <div class="control">
+              <input class="input" type="text" v-model="uploadName" placeholder="e.g. Mr. Blue Sky" />
+            </div>
+          </div>
+          <div class="field">
+            <label class="label">Audio File</label>
+            <div class="control">
+              <input class="input" type="file" accept=".mp3,.m4a" @change="onFileChange" />
+            </div>
+          </div>
+          <div class="field">
+            <label class="label">Cover Image URL <span class="has-text-grey-light">(optional)</span></label>
+            <div class="control">
+              <input class="input" type="text" v-model="uploadImageUrl" placeholder="https://..." />
+            </div>
+          </div>
+          <div class="field">
+            <div class="control">
+              <button
+                class="button is-primary"
+                :class="{'is-loading': uploading}"
+                :disabled="uploading || !uploadName || !uploadFile"
+                @click="uploadSong"
+              >
+                Upload &amp; Write Tag
+              </button>
+            </div>
+          </div>
+          <p v-if="uploadError" class="help is-danger">{{ uploadError }}</p>
+        </div>
+
+        <!-- Loading -->
+        <div v-if="loadingSongs" class="has-text-centered py-5">
+          <span class="spin" style="font-size: 2rem;">⟳</span>
+          <p class="mt-2 has-text-grey">Loading songs...</p>
+        </div>
+
+        <!-- Empty -->
+        <div v-else-if="songs.length === 0 && !showUpload" class="has-text-centered py-5 has-text-grey">
+          <p>No songs yet. Click <strong>+ Add Song</strong> to get started.</p>
+        </div>
+
+        <!-- Song table -->
+        <table v-else-if="songs.length > 0" class="table is-fullwidth is-hoverable">
+          <tbody>
+            <tr v-for="song in songs" :key="song.id" class="song-row">
+              <td style="width: 50px;">
+                <img v-if="song.image_url" :src="song.image_url" class="song-thumb" :alt="song.name" />
+                <span v-else class="has-text-grey-light" style="font-size: 1.5rem;">🎵</span>
+              </td>
+              <td>
+                <strong>{{ song.name }}</strong>
+                <br />
+                <small class="has-text-grey-light">
+                  ID: {{ song.id }}
+                  <span v-if="song.uploaded_at"> · {{ formatDate(song.uploaded_at) }}</span>
+                  <span class="ml-1">· {{ song.filename }}</span>
+                </small>
+              </td>
+              <td style="width: 180px; text-align: right;">
+                <div class="buttons is-right">
+                  <button
+                    class="button is-primary is-small"
+                    :class="{'is-loading': playingId === song.id}"
+                    :disabled="!savedSpeaker || playingId !== null || nfcStatus.offline"
+                    @click="playSong(song)"
+                    :title="nfcStatus.offline ? 'Go online to play' : savedSpeaker ? 'Play on ' + savedSpeaker : 'Save a speaker first'"
+                  >
+                    ▶ Play
+                  </button>
+                  <button
+                    class="button is-info is-small is-outlined"
+                    :class="{'is-loading': retaggingId === song.id}"
+                    :disabled="nfcStatus.mode === 'writing'"
+                    @click="retagSong(song)"
+                    title="Write tag for this song"
+                  >
+                    🏷 Tag
+                  </button>
+                  <button
+                    class="button is-danger is-small is-outlined"
+                    :disabled="deletingId === song.id"
+                    @click="deleteSong(song)"
+                    title="Delete"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p v-if="songError" class="help is-danger mt-2">{{ songError }}</p>
+        <p v-if="playStatus" class="help is-success mt-2">{{ playStatus }}</p>
+      </div>
+
+      <p class="has-text-centered has-text-grey-light mt-4 mb-6">
+        <small>Stonies — running on {{ piHost }}</small>
+      </p>
+
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script>
+    const { createApp, ref, computed, onMounted, onUnmounted } = Vue;
+
+    createApp({
+      setup() {
+        const API = `http://${window.location.hostname}:5000/api`;
+        const piHost = window.location.host;
+
+        // --- Speakers ---
+        const speakers = ref([]);
+        const selectedSpeaker = ref('');
+        const savedSpeaker = ref('');
+        const loadingSpeakers = ref(false);
+        const savingSpeaker = ref(false);
+        const speakerError = ref('');
+
+        async function loadSpeakers() {
+          loadingSpeakers.value = true;
+          speakerError.value = '';
+          try {
+            const res = await fetch(`${API}/speakers`);
+            const data = await res.json();
+            if (data.error) throw new Error(data.error);
+            speakers.value = data.speakers;
+            if (!selectedSpeaker.value && data.speakers.length === 1) {
+              selectedSpeaker.value = data.speakers[0];
+            }
+          } catch (e) {
+            speakerError.value = `Failed to load speakers: ${e.message}`;
+          } finally {
+            loadingSpeakers.value = false;
+          }
+        }
+
+        async function loadConfig() {
+          try {
+            const res = await fetch(`${API}/config`);
+            const data = await res.json();
+            if (data.speaker) {
+              savedSpeaker.value = data.speaker;
+              selectedSpeaker.value = data.speaker;
+            }
+          } catch (_) {}
+        }
+
+        async function saveSpeaker() {
+          savingSpeaker.value = true;
+          speakerError.value = '';
+          try {
+            const res = await fetch(`${API}/config`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ speaker: selectedSpeaker.value }),
+            });
+            const data = await res.json();
+            if (data.error) throw new Error(data.error);
+            savedSpeaker.value = selectedSpeaker.value;
+          } catch (e) {
+            speakerError.value = `Failed to save: ${e.message}`;
+          } finally {
+            savingSpeaker.value = false;
+          }
+        }
+
+        // --- NFC status ---
+        const nfcStatus = ref({ mode: 'listening', sub_state: null, error: null, hw_error: null });
+        const nfcBannerDismissed = ref(false);
+        const successCountdown = ref(0);
+        let nfcPollTimer = null;
+        let countdownTimer = null;
+
+        const nfcBadgeLabel = computed(() => {
+          if (nfcStatus.value.hw_error) return 'NFC Unavailable';
+          if (nfcStatus.value.mode === 'writing') return 'Writing Tag...';
+          return 'Listening';
+        });
+
+        const nfcBadgeClass = computed(() => {
+          if (nfcStatus.value.hw_error) return 'is-warning';
+          if (nfcStatus.value.mode === 'writing') return 'is-info';
+          return 'is-success';
+        });
+
+        const nfcBannerClass = computed(() => {
+          const s = nfcStatus.value.sub_state;
+          if (s === 'success') return 'is-success is-light';
+          if (s === 'error') return 'is-danger is-light';
+          return 'is-info is-light';
+        });
+
+        function dismissNfcBanner() {
+          nfcBannerDismissed.value = true;
+        }
+
+        async function pollNfcStatus() {
+          try {
+            const res = await fetch(`${API}/nfc/status`);
+            const data = await res.json();
+            const prev = nfcStatus.value;
+            nfcStatus.value = data;
+            // Transition into success — start countdown and reload songs
+            if (data.sub_state === 'success' && prev.sub_state !== 'success') {
+              await loadSongs();
+              startCountdown(5);
+            }
+            const done = data.sub_state === 'error' || data.mode === 'listening';
+            if (done) {
+              stopNfcPoll();
+            }
+          } catch (_) {}
+        }
+
+        function startCountdown(seconds) {
+          if (countdownTimer) clearInterval(countdownTimer);
+          successCountdown.value = seconds;
+          countdownTimer = setInterval(() => {
+            successCountdown.value -= 1;
+            if (successCountdown.value <= 0) {
+              clearInterval(countdownTimer);
+              countdownTimer = null;
+            }
+          }, 1000);
+        }
+
+        function startNfcPoll() {
+          stopNfcPoll();
+          nfcPollTimer = setInterval(pollNfcStatus, 500);
+        }
+
+        function stopNfcPoll() {
+          if (nfcPollTimer) {
+            clearInterval(nfcPollTimer);
+            nfcPollTimer = null;
+          }
+        }
+
+        async function cancelWrite() {
+          try {
+            await fetch(`${API}/nfc/cancel`, { method: 'POST' });
+            await pollNfcStatus();
+            await loadSongs();
+          } catch (_) {}
+        }
+
+        // --- Songs ---
+        const songs = ref([]);
+        const loadingSongs = ref(false);
+        const songError = ref('');
+        const playStatus = ref('');
+        const playingId = ref(null);
+        const deletingId = ref(null);
+        const retaggingId = ref(null);
+
+        const showUpload = ref(false);
+        const uploadName = ref('');
+        const uploadFile = ref(null);
+        const uploadImageUrl = ref('');
+        const uploading = ref(false);
+        const uploadError = ref('');
+
+        async function loadSongs() {
+          loadingSongs.value = true;
+          songError.value = '';
+          try {
+            const res = await fetch(`${API}/songs`);
+            const data = await res.json();
+            if (data.error) throw new Error(data.error);
+            songs.value = data.songs;
+          } catch (e) {
+            songError.value = `Failed to load songs: ${e.message}`;
+          } finally {
+            loadingSongs.value = false;
+          }
+        }
+
+        function onFileChange(event) {
+          uploadFile.value = event.target.files[0] || null;
+        }
+
+        async function uploadSong() {
+          uploadError.value = '';
+          if (!uploadName.value || !uploadFile.value) return;
+          uploading.value = true;
+          nfcBannerDismissed.value = false;
+          try {
+            const form = new FormData();
+            form.append('name', uploadName.value);
+            form.append('file', uploadFile.value);
+            form.append('image_url', uploadImageUrl.value);
+            const res = await fetch(`${API}/songs`, { method: 'POST', body: form });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Upload failed');
+            // Reset form
+            uploadName.value = '';
+            uploadFile.value = null;
+            uploadImageUrl.value = '';
+            showUpload.value = false;
+            // Start polling NFC status
+            await pollNfcStatus();
+            startNfcPoll();
+          } catch (e) {
+            uploadError.value = e.message;
+          } finally {
+            uploading.value = false;
+          }
+        }
+
+        async function playSong(song) {
+          if (!savedSpeaker.value) return;
+          playingId.value = song.id;
+          playStatus.value = '';
+          songError.value = '';
+          try {
+            const res = await fetch(`${API}/play`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ id: song.id }),
+            });
+            const data = await res.json();
+            if (data.error) throw new Error(data.error);
+            playStatus.value = data.message;
+          } catch (e) {
+            songError.value = `Play error: ${e.message}`;
+          } finally {
+            playingId.value = null;
+          }
+        }
+
+        async function retagSong(song) {
+          retaggingId.value = song.id;
+          nfcBannerDismissed.value = false;
+          try {
+            const res = await fetch(`${API}/songs/${song.id}/retag`, { method: 'POST' });
+            const data = await res.json();
+            if (data.error) throw new Error(data.error);
+            await pollNfcStatus();
+            startNfcPoll();
+          } catch (e) {
+            songError.value = `Retag error: ${e.message}`;
+          } finally {
+            retaggingId.value = null;
+          }
+        }
+
+        async function toggleOffline() {
+          try {
+            await fetch(`${API}/offline/toggle`, { method: 'POST' });
+            await pollNfcStatus();
+          } catch (_) {}
+        }
+
+        function formatDate(iso) {
+          if (!iso) return '';
+          const d = new Date(iso);
+          return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+        }
+
+        async function deleteSong(song) {
+          if (!confirm(`Delete "${song.name}"?`)) return;
+          deletingId.value = song.id;
+          songError.value = '';
+          try {
+            const res = await fetch(`${API}/songs/${song.id}`, { method: 'DELETE' });
+            const data = await res.json();
+            if (data.error) throw new Error(data.error);
+            songs.value = songs.value.filter(s => s.id !== song.id);
+          } catch (e) {
+            songError.value = `Delete error: ${e.message}`;
+          } finally {
+            deletingId.value = null;
+          }
+        }
+
+        // Low-frequency background poll to keep offline last-seen and mode badge fresh
+        let bgPollTimer = null;
+        function startBgPoll() {
+          bgPollTimer = setInterval(async () => {
+            if (!nfcPollTimer) await pollNfcStatus();
+          }, 2000);
+        }
+
+        onMounted(async () => {
+          await Promise.all([loadConfig(), loadSpeakers(), loadSongs()]);
+          await pollNfcStatus();
+          startBgPoll();
+        });
+
+        onUnmounted(() => {
+          stopNfcPoll();
+          if (bgPollTimer) clearInterval(bgPollTimer);
+        });
+
+        return {
+          piHost,
+          // speakers
+          speakers, selectedSpeaker, savedSpeaker,
+          loadingSpeakers, savingSpeaker, speakerError,
+          loadSpeakers, saveSpeaker,
+          // nfc
+          nfcStatus, nfcBadgeLabel, nfcBadgeClass, nfcBannerClass,
+          nfcBannerDismissed, successCountdown, dismissNfcBanner, cancelWrite,
+          // songs
+          songs, loadingSongs, songError, playStatus, playingId, deletingId, retaggingId,
+          showUpload, uploadName, uploadFile, uploadImageUrl,
+          uploading, uploadError,
+          onFileChange, uploadSong, playSong, deleteSong, retagSong,
+          toggleOffline, formatDate,
+        };
+      }
+    }).mount('#app');
+  </script>
+</body>
+</html>
