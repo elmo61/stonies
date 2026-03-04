@@ -192,6 +192,16 @@ def cast_audiobook(song, config_path, config_lock, pi_ip, start_index=0, start_t
         filename = ch["filename"]
         ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
         mime = "audio/mp4" if ext == "m4a" else "audio/mpeg"
+        book_name = song.get("name", "")
+        image_url = song.get("image_url", "")
+        metadata = {
+            "metadataType": 3,          # MusicTrackMediaMetadata
+            "title": ch.get("name", f"Chapter {i + 1}"),
+            "albumName": book_name,
+            "trackNumber": i + 1,
+        }
+        if image_url:
+            metadata["images"] = [{"url": image_url}]
         queue_items.append({
             "autoplay": True,
             "preloadTime": 3,
@@ -199,10 +209,7 @@ def cast_audiobook(song, config_path, config_lock, pi_ip, start_index=0, start_t
                 "contentId": url,
                 "contentType": mime,
                 "streamType": "BUFFERED",
-                "metadata": {
-                    "metadataType": 0,
-                    "title": ch.get("name", f"Chapter {i + 1}"),
-                },
+                "metadata": metadata,
             },
         })
 
@@ -255,7 +262,11 @@ def cast_song(song, config_path, config_lock, pi_ip):
 
     cast = chromecasts[0]
     cast.wait()
-    cast.media_controller.play_media(url, mime)
+    cast.media_controller.play_media(
+        url, mime,
+        title=song.get("name", ""),
+        thumb=song.get("image_url") or None,
+    )
     cast.media_controller.block_until_active()
 
 
