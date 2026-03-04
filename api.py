@@ -429,6 +429,7 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, song
     def play():
         body = request.get_json(silent=True) or {}
         song_id = body.get("id", "").strip()
+        chapter_index = body.get("chapter_index")  # None = use saved progress
         if not song_id:
             return jsonify({"error": "id is required"}), 400
 
@@ -439,7 +440,14 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, song
         try:
             state.add_log(f"Web play: \"{song['name']}\"...")
             if song.get("type") == "audiobook":
-                cast_audiobook(song, config_path, config_lock, pi_ip)
+                prog = song.get("progress", {})
+                if chapter_index is not None:
+                    start_index, start_time = chapter_index, 0
+                else:
+                    start_index = prog.get("chapter_index", 0)
+                    start_time = prog.get("current_time", 0)
+                cast_audiobook(song, config_path, config_lock, pi_ip,
+                               start_index=start_index, start_time=start_time)
             else:
                 cast_song(song, config_path, config_lock, pi_ip)
             state.add_log(f"Now playing \"{song['name']}\"")
@@ -447,5 +455,120 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, song
         except Exception as e:
             state.add_log(f"Play failed: {e}")
             return jsonify({"error": str(e)}), 500
+
+    @app.route("/api/playback/status")
+    def playback_status():
+        import pychromecast
+        import time as _time
+        from urllib.parse import unquote, urlparse
+
+        with config_lock:
+            try:
+                with open(config_path, "r") as f:
+                    config = json.load(f)
+            except Exception:
+                config = {}
+
+        speaker_name = config.get("speaker", "").strip()
+        if not speaker_name:
+            return jsonify({"playing": False})
+
+        try:
+            chromecasts, browser = pychromecast.get_listed_chromecasts(
+                friendly_names=[speaker_name]
+            )
+            if browser:
+                pychromecast.discovery.stop_discovery(browser)
+            if not chromecasts:
+                return jsonify({"playing": False})
+
+            cast = chromecasts[0]
+            cast.wait(timeout=5)
+            mc = cast.media_controller
+            mc.update_status()
+            _time.sleep(1)
+            status = mc.status
+
+            if not status or status.player_state not in ("PLAYING", "PAUSED", "BUFFERING"):
+                return jsonify({"playing": False})
+
+            content_id = status.content_id or ""
+            current_time = round(status.current_time or 0, 1)
+            result = {
+                "playing": True,
+                "player_state": status.player_state,
+                "current_time": current_time,
+                "song_id": None,
+                "chapter_index": None,
+            }
+
+            # Parse path after /music/ to identify the song
+            path = None
+            try:
+                parsed = urlparse(content_id)
+                parts = parsed.path.split("/music/", 1)
+                if len(parts) == 2:
+                    path = unquote(parts[1])
+            except Exception:
+                pass
+
+            if not path:
+                return jsonify(result)
+
+            with songs_lock:
+                try:
+                    with open(songs_path, "r") as f:
+                        songs = json.load(f)
+                except Exception:
+                    songs = []
+
+                path_parts = path.split("/", 1)
+                matched = None
+                chapter_idx = None
+
+                if len(path_parts) == 1:
+                    # Track: filename matches directly
+                    for s in songs:
+                        if s.get("type", "track") == "track" and s.get("filename") == path_parts[0]:
+                            matched = s
+                            break
+                else:
+                    # Audiobook: folder/chapter_filename
+                    folder, ch_file = path_parts
+                    for s in songs:
+                        if s.get("type") == "audiobook" and s.get("folder") == folder:
+                            matched = s
+                            for i, ch in enumerate(s.get("chapters", [])):
+                                if ch.get("filename") == ch_file:
+                                    chapter_idx = i
+                                    break
+                            break
+
+                if matched:
+                    result["song_id"] = matched["id"]
+                    result["song_name"] = matched.get("name")
+                    result["song_type"] = matched.get("type", "track")
+                    result["chapter_index"] = chapter_idx
+
+                    # Save progress — audiobooks only
+                    if matched.get("type") == "audiobook":
+                        progress = {
+                            "current_time": current_time,
+                            "updated_at": datetime.now().isoformat(timespec="seconds"),
+                        }
+                        if chapter_idx is not None:
+                            progress["chapter_index"] = chapter_idx
+                        for s in songs:
+                            if s.get("id") == matched["id"]:
+                                s["progress"] = progress
+                                break
+                        with open(songs_path, "w") as f:
+                            json.dump(songs, f, indent=2)
+                        result["progress"] = progress
+
+            return jsonify(result)
+
+        except Exception as e:
+            return jsonify({"playing": False, "error": str(e)})
 
     return app

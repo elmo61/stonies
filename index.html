@@ -263,12 +263,30 @@
                   <span v-if="song.uploaded_at"> · {{ formatDate(song.uploaded_at) }}</span>
                   <span v-if="song.type === 'audiobook'">
                     · {{ song.chapters.length }} chapters
+                    <span v-if="song.progress" class="ml-1 has-text-info">
+                      · Ch {{ (song.progress.chapter_index || 0) + 1 }} · {{ formatTime(song.progress.current_time) }}
+                    </span>
                     <a class="ml-1" @click.prevent="toggleChapters(song.id)" href="#">[{{ expandedId === song.id ? 'hide' : 'show' }}]</a>
                   </span>
                   <span v-else class="ml-1">· {{ song.filename }}</span>
                 </small>
-                <ol v-if="song.type === 'audiobook' && expandedId === song.id" class="mt-2 ml-4" style="font-size: 0.8rem; color: #555;">
-                  <li v-for="ch in song.chapters" :key="ch.filename">{{ ch.name }}</li>
+                <ol v-if="song.type === 'audiobook' && expandedId === song.id" class="mt-2 ml-4" style="font-size: 0.8rem; color: #555; list-style: none; padding: 0;">
+                  <li v-for="(ch, i) in song.chapters" :key="ch.filename" class="mb-1" style="display: flex; align-items: center; gap: 6px;">
+                    <button
+                      class="button is-primary is-small py-0"
+                      style="height: 1.4rem; min-width: 2rem; font-size: 0.7rem;"
+                      :class="{'is-loading': playingId === song.id}"
+                      :disabled="!savedSpeaker || playingId !== null || nfcStatus.offline"
+                      @click="playChapter(song, i)"
+                      :title="`Play from chapter ${i + 1}`"
+                    >▶</button>
+                    <span :class="playbackStatus.song_id === song.id && playbackStatus.chapter_index === i ? 'has-text-success has-text-weight-semibold' : ''">
+                      {{ i + 1 }}. {{ ch.name }}
+                      <span v-if="playbackStatus.song_id === song.id && playbackStatus.chapter_index === i" class="has-text-grey ml-1" style="font-size:0.7rem;">
+                        ▶ {{ formatTime(playbackStatus.current_time) }}
+                      </span>
+                    </span>
+                  </li>
                 </ol>
               </td>
               <td style="width: 180px; text-align: right;">
@@ -278,7 +296,7 @@
                     :class="{'is-loading': playingId === song.id}"
                     :disabled="!savedSpeaker || playingId !== null || nfcStatus.offline"
                     @click="playSong(song)"
-                    :title="nfcStatus.offline ? 'Go online to play' : savedSpeaker ? 'Play on ' + savedSpeaker : 'Save a speaker first'"
+                    :title="nfcStatus.offline ? 'Go online to play' : !savedSpeaker ? 'Save a speaker first' : song.type === 'audiobook' && song.progress ? `Resume Ch ${(song.progress.chapter_index||0)+1} on ${savedSpeaker}` : 'Play on ' + savedSpeaker"
                   >
                     ▶ Play
                   </button>
@@ -475,6 +493,37 @@
           } catch (_) {}
         }
 
+        // --- Playback status poll ---
+        const playbackStatus = ref({ playing: false });
+        let playbackPollTimer = null;
+
+        function formatTime(seconds) {
+          if (!seconds || seconds < 1) return '';
+          const h = Math.floor(seconds / 3600);
+          const m = Math.floor((seconds % 3600) / 60);
+          const s = Math.floor(seconds % 60);
+          if (h > 0) return `${h}h ${m}m`;
+          return `${m}:${s.toString().padStart(2, '0')}`;
+        }
+
+        async function pollPlayback() {
+          try {
+            const res = await fetch(`${API}/playback/status`);
+            const data = await res.json();
+            playbackStatus.value = data;
+            // Patch progress into the local songs array so display updates without reload
+            if (data.song_id && data.song_type === 'audiobook' && data.progress) {
+              const song = songs.value.find(s => s.id === data.song_id);
+              if (song) song.progress = data.progress;
+            }
+          } catch (_) {}
+        }
+
+        function startPlaybackPoll() {
+          if (playbackPollTimer) clearInterval(playbackPollTimer);
+          playbackPollTimer = setInterval(pollPlayback, 30000);
+        }
+
         // --- Import scan ---
         const scanning = ref(false);
         const scanResult = ref(null);
@@ -653,6 +702,29 @@
             const data = await res.json();
             if (data.error) throw new Error(data.error);
             playStatus.value = data.message;
+            setTimeout(pollPlayback, 3000);
+          } catch (e) {
+            songError.value = `Play error: ${e.message}`;
+          } finally {
+            playingId.value = null;
+          }
+        }
+
+        async function playChapter(song, chapterIndex) {
+          if (!savedSpeaker.value) return;
+          playingId.value = song.id;
+          playStatus.value = '';
+          songError.value = '';
+          try {
+            const res = await fetch(`${API}/play`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ id: song.id, chapter_index: chapterIndex }),
+            });
+            const data = await res.json();
+            if (data.error) throw new Error(data.error);
+            playStatus.value = data.message;
+            setTimeout(pollPlayback, 3000);
           } catch (e) {
             songError.value = `Play error: ${e.message}`;
           } finally {
@@ -720,11 +792,14 @@
           await Promise.all([loadConfig(), loadSpeakers(), loadSongs()]);
           await pollNfcStatus();
           startBgPoll();
+          startPlaybackPoll();
+          pollPlayback();
         });
 
         onUnmounted(() => {
           stopNfcPoll();
           if (bgPollTimer) clearInterval(bgPollTimer);
+          if (playbackPollTimer) clearInterval(playbackPollTimer);
         });
 
         return {
@@ -740,11 +815,12 @@
           songs, loadingSongs, songError, playStatus, playingId, deletingId, retaggingId,
           showUpload, uploadName, uploadFile, uploadImageUrl,
           uploading, uploadError,
+          playbackStatus, formatTime,
           scanning, scanResult, scanImports,
           activityLog,
           expandedId, toggleChapters,
           uploadType, uploadChapters, setUploadType, onAudiobookFilesChange,
-          onFileChange, uploadSong, playSong, deleteSong, retagSong,
+          onFileChange, uploadSong, playSong, playChapter, deleteSong, retagSong,
           toggleOffline, formatDate,
         };
       }

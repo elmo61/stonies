@@ -165,7 +165,7 @@ def lookup_song(id_str, songs_path, songs_lock):
     return None
 
 
-def cast_audiobook(song, config_path, config_lock, pi_ip):
+def cast_audiobook(song, config_path, config_lock, pi_ip, start_index=0, start_time=0):
     """Queue all chapters of an audiobook on the configured speaker. Raises on any failure."""
     import pychromecast
     from urllib.parse import quote
@@ -218,8 +218,8 @@ def cast_audiobook(song, config_path, config_lock, pi_ip):
         {
             "type": "QUEUE_LOAD",
             "repeatMode": "REPEAT_OFF",
-            "startIndex": 0,
-            "currentTime": 0,
+            "startIndex": start_index,
+            "currentTime": start_time,
             "items": queue_items,
         },
         inc_session_id=True,
@@ -304,7 +304,12 @@ def run_daemon(state, songs_path, songs_lock, config_path, config_lock, pi_ip):
                                 state.add_log(f"Casting \"{song['name']}\"...")
                                 try:
                                     if song.get("type") == "audiobook":
-                                        cast_audiobook(song, config_path, config_lock, pi_ip)
+                                        prog = song.get("progress", {})
+                                        cast_audiobook(
+                                            song, config_path, config_lock, pi_ip,
+                                            start_index=prog.get("chapter_index", 0),
+                                            start_time=prog.get("current_time", 0),
+                                        )
                                     else:
                                         cast_song(song, config_path, config_lock, pi_ip)
                                     print(f"[NFC] Now playing '{song['name']}'")
