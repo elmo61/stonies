@@ -10,7 +10,7 @@ from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
-from nfc_daemon import cast_audiobook, cast_song, lookup_song
+from nfc_daemon import cast_audiobook, cast_song, lookup_song, check_and_schedule_sleep
 
 
 AUDIO_EXTS = (".mp3", ".m4a")
@@ -138,18 +138,23 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, song
     def save_config():
         body = request.get_json(silent=True) or {}
         speaker = body.get("speaker", "").strip()
-        if not speaker:
-            return jsonify({"error": "speaker is required"}), 400
+        sleep_timer = body.get("sleep_timer")
+        if not speaker and sleep_timer is None:
+            return jsonify({"error": "Nothing to save"}), 400
         with config_lock:
             try:
                 with open(config_path, "r") as f:
                     existing = json.load(f)
             except Exception:
                 existing = {}
-            existing["speaker"] = speaker
+            if speaker:
+                existing["speaker"] = speaker
+            if sleep_timer is not None:
+                existing["sleep_timer"] = sleep_timer
             with open(config_path, "w") as f:
                 json.dump(existing, f, indent=2)
-        return jsonify({"ok": True, "speaker": speaker})
+        return jsonify({"ok": True, "speaker": existing.get("speaker", ""),
+                        "sleep_timer": existing.get("sleep_timer")})
 
     # ------------------------------------------------------------------
     # Songs
@@ -451,6 +456,7 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, song
             else:
                 cast_song(song, config_path, config_lock, pi_ip)
             state.add_log(f"Now playing \"{song['name']}\"")
+            check_and_schedule_sleep(state, config_path, config_lock, pi_ip)
             return jsonify({"ok": True, "message": f"Now playing '{song['name']}'"})
         except Exception as e:
             state.add_log(f"Play failed: {e}")
@@ -597,6 +603,7 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, song
             mc.update_status()
             _time.sleep(1)
             mc.stop()
+            state.cancel_sleep()
             state.add_log(f"Playback stopped on \"{speaker_name}\"")
             return jsonify({"ok": True})
         except Exception as e:

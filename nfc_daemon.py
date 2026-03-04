@@ -19,6 +19,8 @@ class NFCState:
         self._last_seen_song = None    # last matched song in offline mode
         self._log = []                 # activity log entries [{seq, time, msg}]
         self._log_seq = 0
+        self._sleep_timer = None       # threading.Timer for bedtime stop
+        self._sleep_stops_at = None    # ISO string when sleep will fire
 
     # --- Public API for Flask ---
 
@@ -33,6 +35,27 @@ class NFCState:
             if len(self._log) > 200:
                 self._log = self._log[-200:]
 
+    def schedule_sleep(self, seconds, stop_fn):
+        """Start a sleep timer, cancelling any existing one."""
+        self.cancel_sleep()
+        from datetime import timedelta
+        stops_at = datetime.now() + timedelta(seconds=seconds)
+        t = threading.Timer(seconds, stop_fn)
+        t.daemon = True
+        t.start()
+        with self._lock:
+            self._sleep_timer = t
+            self._sleep_stops_at = stops_at.isoformat(timespec="seconds")
+
+    def cancel_sleep(self):
+        """Cancel any active sleep timer."""
+        with self._lock:
+            t = self._sleep_timer
+            self._sleep_timer = None
+            self._sleep_stops_at = None
+        if t:
+            t.cancel()
+
     def get_status(self):
         with self._lock:
             return {
@@ -42,6 +65,7 @@ class NFCState:
                 "hw_error": self._hw_error,
                 "offline": self._offline,
                 "last_seen_song": self._last_seen_song,
+                "sleep_stops_at": self._sleep_stops_at,
                 "log": list(self._log),
             }
 
@@ -271,6 +295,74 @@ def cast_song(song, config_path, config_lock, pi_ip):
 
 
 # ---------------------------------------------------------------------------
+# Sleep timer helpers
+# ---------------------------------------------------------------------------
+
+def sleep_timer_seconds(config):
+    """Return duration in seconds if sleep timer should apply right now, else None."""
+    st = config.get("sleep_timer", {})
+    if not st.get("enabled"):
+        return None
+    after_time = st.get("after_time", "19:00")
+    duration_minutes = int(st.get("duration_minutes", 60))
+    try:
+        now = datetime.now()
+        h, m = map(int, after_time.split(":"))
+        if now.hour > h or (now.hour == h and now.minute >= m):
+            return duration_minutes * 60
+    except Exception:
+        pass
+    return None
+
+
+def make_stop_fn(config_path, config_lock, pi_ip, state):
+    """Return a callback that stops Chromecast playback (used by sleep timer)."""
+    def _stop():
+        import pychromecast
+        import time as _time
+        try:
+            with config_lock:
+                with open(config_path, "r") as f:
+                    cfg = json.load(f)
+            speaker_name = cfg.get("speaker", "").strip()
+            if not speaker_name:
+                return
+            chromecasts, browser = pychromecast.get_listed_chromecasts(
+                friendly_names=[speaker_name]
+            )
+            if not chromecasts:
+                return
+            cast = chromecasts[0]
+            cast.wait(timeout=5)
+            mc = cast.media_controller
+            mc.update_status()
+            _time.sleep(1)
+            mc.stop()
+            state.add_log("Sleep timer fired — playback stopped")
+        except Exception as e:
+            state.add_log(f"Sleep timer stop failed: {e}")
+        finally:
+            with state._lock:
+                state._sleep_timer = None
+                state._sleep_stops_at = None
+    return _stop
+
+
+def check_and_schedule_sleep(state, config_path, config_lock, pi_ip):
+    """Read config and schedule a sleep timer if conditions are met."""
+    try:
+        with config_lock:
+            with open(config_path, "r") as f:
+                cfg = json.load(f)
+    except Exception:
+        return
+    secs = sleep_timer_seconds(cfg)
+    if secs:
+        state.schedule_sleep(secs, make_stop_fn(config_path, config_lock, pi_ip, state))
+        state.add_log(f"Sleep timer set — stops in {secs // 60} min")
+
+
+# ---------------------------------------------------------------------------
 # Daemon loop
 # ---------------------------------------------------------------------------
 
@@ -325,6 +417,7 @@ def run_daemon(state, songs_path, songs_lock, config_path, config_lock, pi_ip):
                                         cast_song(song, config_path, config_lock, pi_ip)
                                     print(f"[NFC] Now playing '{song['name']}'")
                                     state.add_log(f"Now playing \"{song['name']}\"")
+                                    check_and_schedule_sleep(state, config_path, config_lock, pi_ip)
                                 except Exception as e:
                                     print(f"[NFC] Cast error: {e}")
                                     state.add_log(f"Cast failed: {e}")

@@ -82,6 +82,9 @@
           </span>
           <span v-else-if="playbackStatus.current_time" class="has-text-grey-light ml-2">· {{ formatTime(playbackStatus.current_time) }}</span>
           <span class="tag is-warning is-light is-small ml-2">{{ playbackStatus.player_state }}</span>
+          <span v-if="nfcStatus.sleep_stops_at" class="tag is-info is-light is-small ml-2" :title="'Stops at ' + nfcStatus.sleep_stops_at">
+            🌙 {{ formatSleepCountdown(nfcStatus.sleep_stops_at) }}
+          </span>
         </span>
         <button class="button is-danger is-small" :class="{'is-loading': stopping}" @click="stopPlayback">■ Stop</button>
       </div>
@@ -135,6 +138,37 @@
         </div>
         <p v-if="savedSpeaker" class="help is-success">Saved: {{ savedSpeaker }}</p>
         <p v-if="speakerError" class="help is-danger">{{ speakerError }}</p>
+
+        <hr style="margin: 0.75rem 0;" />
+
+        <h3 class="title is-6 mb-3">🌙 Bedtime Sleep Timer</h3>
+        <div class="field">
+          <label class="checkbox">
+            <input type="checkbox" v-model="sleepTimer.enabled" class="mr-1" />
+            Stop playback automatically at night
+          </label>
+        </div>
+        <div v-if="sleepTimer.enabled" class="columns is-mobile is-vcentered mb-0">
+          <div class="column is-narrow">
+            <label class="label is-small mb-1">Active after</label>
+            <input class="input is-small" type="time" v-model="sleepTimer.after_time" style="width: 110px;" />
+          </div>
+          <div class="column is-narrow">
+            <label class="label is-small mb-1">Stop after</label>
+            <div class="field has-addons mb-0">
+              <div class="control">
+                <input class="input is-small" type="number" v-model.number="sleepTimer.duration_minutes" min="1" max="240" style="width: 70px;" />
+              </div>
+              <div class="control">
+                <span class="button is-static is-small">min</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="mt-2">
+          <button class="button is-small is-info" :class="{'is-loading': savingSleep}" @click="saveSleepTimer">Save</button>
+          <span v-if="sleepSaveStatus" class="help is-success ml-2" style="display:inline;">{{ sleepSaveStatus }}</span>
+        </div>
       </div>
 
       <!-- Song library box -->
@@ -397,6 +431,10 @@
           }
         }
 
+        const sleepTimer = ref({ enabled: false, after_time: '19:00', duration_minutes: 60 });
+        const savingSleep = ref(false);
+        const sleepSaveStatus = ref('');
+
         async function loadConfig() {
           try {
             const res = await fetch(`${API}/config`);
@@ -405,7 +443,39 @@
               savedSpeaker.value = data.speaker;
               selectedSpeaker.value = data.speaker;
             }
+            if (data.sleep_timer) {
+              sleepTimer.value = { ...sleepTimer.value, ...data.sleep_timer };
+            }
           } catch (_) {}
+        }
+
+        async function saveSleepTimer() {
+          savingSleep.value = true;
+          sleepSaveStatus.value = '';
+          try {
+            const res = await fetch(`${API}/config`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ sleep_timer: { ...sleepTimer.value } }),
+            });
+            const data = await res.json();
+            if (data.error) throw new Error(data.error);
+            sleepSaveStatus.value = 'Saved';
+            setTimeout(() => sleepSaveStatus.value = '', 2000);
+          } catch (e) {
+            sleepSaveStatus.value = `Error: ${e.message}`;
+          } finally {
+            savingSleep.value = false;
+          }
+        }
+
+        function formatSleepCountdown(isoStr) {
+          if (!isoStr) return '';
+          const diff = Math.max(0, Math.round((new Date(isoStr) - Date.now()) / 1000));
+          const h = Math.floor(diff / 3600);
+          const m = Math.floor((diff % 3600) / 60);
+          if (h > 0) return `${h}h ${m}m`;
+          return `${m}m`;
         }
 
         async function saveSpeaker() {
@@ -847,6 +917,7 @@
           showUpload, uploadName, uploadFile, uploadImageUrl,
           uploading, uploadError,
           playbackStatus, formatTime, stopping, stopPlayback,
+          sleepTimer, savingSleep, sleepSaveStatus, saveSleepTimer, formatSleepCountdown,
           scanning, scanResult, scanImports,
           activityLog,
           expandedId, toggleChapters,
