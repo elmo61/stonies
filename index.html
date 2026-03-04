@@ -129,38 +129,87 @@
             <h2 class="title is-5 mb-0">Song Library</h2>
           </div>
           <div class="level-right">
-            <button class="button is-primary is-small" @click="showUpload = !showUpload">
-              {{ showUpload ? 'Cancel' : '+ Add Song' }}
-            </button>
+            <div class="buttons">
+              <button
+                class="button is-light is-small"
+                :class="{'is-loading': scanning}"
+                @click="scanImports"
+                title="Move files from music_import/ into the library"
+              >
+                📥 Scan Imports
+              </button>
+              <button class="button is-primary is-small" @click="showUpload = !showUpload; if (!showUpload) setUploadType('track')">
+                {{ showUpload ? 'Cancel' : '+ Add Song' }}
+              </button>
+            </div>
           </div>
         </div>
 
         <!-- Upload form -->
         <div v-if="showUpload" class="upload-form mb-4">
+
+          <!-- Type toggle -->
           <div class="field">
-            <label class="label">Song Name</label>
-            <div class="control">
-              <input class="input" type="text" v-model="uploadName" placeholder="e.g. Mr. Blue Sky" />
+            <label class="label">Type</label>
+            <div class="buttons has-addons">
+              <button class="button is-small" :class="uploadType === 'track' ? 'is-info is-selected' : 'is-light'" @click="setUploadType('track')">🎵 Track</button>
+              <button class="button is-small" :class="uploadType === 'audiobook' ? 'is-info is-selected' : 'is-light'" @click="setUploadType('audiobook')">📚 Audiobook</button>
             </div>
           </div>
+
+          <!-- Name -->
           <div class="field">
+            <label class="label">{{ uploadType === 'audiobook' ? 'Audiobook Name' : 'Song Name' }}</label>
+            <div class="control">
+              <input class="input" type="text" v-model="uploadName" :placeholder="uploadType === 'audiobook' ? 'e.g. Harry Potter and the Philosopher\'s Stone' : 'e.g. Mr. Blue Sky'" />
+            </div>
+          </div>
+
+          <!-- TRACK: single file -->
+          <div v-if="uploadType === 'track'" class="field">
             <label class="label">Audio File</label>
             <div class="control">
               <input class="input" type="file" accept=".mp3,.m4a" @change="onFileChange" />
             </div>
           </div>
+
+          <!-- AUDIOBOOK: folder or files -->
+          <div v-if="uploadType === 'audiobook'" class="field">
+            <label class="label">Chapter Files</label>
+            <div class="mb-2">
+              <button class="button is-small is-light mr-2" type="button" @click="$refs.folderPicker.click()">📁 Select Folder</button>
+              <button class="button is-small is-light" type="button" @click="$refs.filesPicker.click()">📄 Select Files</button>
+              <input ref="folderPicker" type="file" webkitdirectory multiple accept=".mp3,.m4a" style="display:none" @change="onAudiobookFilesChange" />
+              <input ref="filesPicker" type="file" multiple accept=".mp3,.m4a" style="display:none" @change="onAudiobookFilesChange" />
+            </div>
+            <div v-if="uploadChapters.length > 0">
+              <p class="help mb-2">{{ uploadChapters.length }} chapter{{ uploadChapters.length !== 1 ? 's' : '' }} selected — edit names if needed:</p>
+              <div v-for="(ch, i) in uploadChapters" :key="i" class="field has-addons mb-1">
+                <div class="control">
+                  <span class="button is-small is-static">{{ i + 1 }}.</span>
+                </div>
+                <div class="control is-expanded">
+                  <input class="input is-small" type="text" v-model="ch.name" :placeholder="`Chapter ${i + 1}`" />
+                </div>
+              </div>
+            </div>
+            <p v-else class="help has-text-grey">Select a folder or multiple audio files.</p>
+          </div>
+
+          <!-- Cover image -->
           <div class="field">
             <label class="label">Cover Image URL <span class="has-text-grey-light">(optional)</span></label>
             <div class="control">
               <input class="input" type="text" v-model="uploadImageUrl" placeholder="https://..." />
             </div>
           </div>
+
           <div class="field">
             <div class="control">
               <button
                 class="button is-primary"
                 :class="{'is-loading': uploading}"
-                :disabled="uploading || !uploadName || !uploadFile"
+                :disabled="uploading || !uploadName || (uploadType === 'track' ? !uploadFile : uploadChapters.length === 0)"
                 @click="uploadSong"
               >
                 Upload &amp; Write Tag
@@ -168,6 +217,21 @@
             </div>
           </div>
           <p v-if="uploadError" class="help is-danger">{{ uploadError }}</p>
+        </div>
+
+        <!-- Import scan result -->
+        <div v-if="scanResult" class="notification is-success is-light mb-3">
+          <button class="delete" @click="scanResult = null"></button>
+          <strong>Import complete:</strong>
+          <span v-for="(item, i) in scanResult.imported" :key="i">
+            {{ i > 0 ? ', ' : ' ' }}
+            <span v-if="item.type === 'audiobook'">📚 {{ item.name }} ({{ item.chapters }} chapters)</span>
+            <span v-else>🎵 {{ item.name }}</span>
+          </span>
+          <span v-if="scanResult.imported.length === 0">Nothing new found in music_import/.</span>
+          <span v-if="scanResult.errors.length > 0" class="has-text-danger ml-2">
+            {{ scanResult.errors.length }} error(s): {{ scanResult.errors.join('; ') }}
+          </span>
         </div>
 
         <!-- Loading -->
@@ -187,16 +251,25 @@
             <tr v-for="song in songs" :key="song.id" class="song-row">
               <td style="width: 50px;">
                 <img v-if="song.image_url" :src="song.image_url" class="song-thumb" :alt="song.name" />
+                <span v-else-if="song.type === 'audiobook'" style="font-size: 1.5rem;">📚</span>
                 <span v-else class="has-text-grey-light" style="font-size: 1.5rem;">🎵</span>
               </td>
               <td>
                 <strong>{{ song.name }}</strong>
+                <span v-if="song.type === 'audiobook'" class="tag is-info is-light is-small ml-2">Audiobook</span>
                 <br />
                 <small class="has-text-grey-light">
                   ID: {{ song.id }}
                   <span v-if="song.uploaded_at"> · {{ formatDate(song.uploaded_at) }}</span>
-                  <span class="ml-1">· {{ song.filename }}</span>
+                  <span v-if="song.type === 'audiobook'">
+                    · {{ song.chapters.length }} chapters
+                    <a class="ml-1" @click.prevent="toggleChapters(song.id)" href="#">[{{ expandedId === song.id ? 'hide' : 'show' }}]</a>
+                  </span>
+                  <span v-else class="ml-1">· {{ song.filename }}</span>
                 </small>
+                <ol v-if="song.type === 'audiobook' && expandedId === song.id" class="mt-2 ml-4" style="font-size: 0.8rem; color: #555;">
+                  <li v-for="ch in song.chapters" :key="ch.filename">{{ ch.name }}</li>
+                </ol>
               </td>
               <td style="width: 180px; text-align: right;">
                 <div class="buttons is-right">
@@ -388,6 +461,35 @@
           } catch (_) {}
         }
 
+        // --- Import scan ---
+        const scanning = ref(false);
+        const scanResult = ref(null);
+
+        async function scanImports() {
+          scanning.value = true;
+          scanResult.value = null;
+          songError.value = '';
+          try {
+            const res = await fetch(`${API}/import/scan`, { method: 'POST' });
+            const data = await res.json();
+            if (data.error) throw new Error(data.error);
+            scanResult.value = data;
+            if (data.imported.length > 0) {
+              songs.value = data.songs;
+            }
+          } catch (e) {
+            songError.value = `Scan error: ${e.message}`;
+          } finally {
+            scanning.value = false;
+          }
+        }
+
+        // --- Audiobook chapter expansion ---
+        const expandedId = ref(null);
+        function toggleChapters(id) {
+          expandedId.value = expandedId.value === id ? null : id;
+        }
+
         // --- Songs ---
         const songs = ref([]);
         const loadingSongs = ref(false);
@@ -398,11 +500,56 @@
         const retaggingId = ref(null);
 
         const showUpload = ref(false);
+        const uploadType = ref('track');
         const uploadName = ref('');
         const uploadFile = ref(null);
         const uploadImageUrl = ref('');
         const uploading = ref(false);
         const uploadError = ref('');
+        const uploadChapters = ref([]); // [{file, name}]
+
+        function setUploadType(t) {
+          uploadType.value = t;
+          uploadName.value = '';
+          uploadFile.value = null;
+          uploadChapters.value = [];
+          uploadError.value = '';
+        }
+
+        function deriveChapterName(filename) {
+          let name = filename.replace(/\.[^.]+$/, '');
+          name = name.replace(/^CH\d+[\s\-_]*/i, '');
+          name = name.replace(/[-_]/g, ' ').replace(/\s+/g, ' ').trim();
+          name = name.replace(/\w\S*/g, w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+          name = name.replace(/(\w)'S\b/g, "$1's");
+          return name || filename;
+        }
+
+        function deriveBookName(name) {
+          name = name.replace(/^\d+[\s\-_]*/, '');
+          name = name.replace(/[-_]/g, ' ').replace(/\s+/g, ' ').trim();
+          name = name.replace(/\w\S*/g, w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+          name = name.replace(/(\w)'S\b/g, "$1's");
+          return name;
+        }
+
+        function onAudiobookFilesChange(event) {
+          const files = Array.from(event.target.files).filter(f =>
+            /\.(mp3|m4a)$/i.test(f.name)
+          );
+          if (!files.length) return;
+          files.sort((a, b) => a.name.localeCompare(b.name));
+
+          // Auto-populate book name from folder (webkitRelativePath = "FolderName/file.mp3")
+          if (!uploadName.value && files[0].webkitRelativePath) {
+            const folder = files[0].webkitRelativePath.split('/')[0];
+            uploadName.value = deriveBookName(folder);
+          }
+
+          uploadChapters.value = files.map(f => ({ file: f, name: deriveChapterName(f.name) }));
+          // Reset the input so the same folder can be re-selected if needed
+          event.target.value = '';
+        }
 
         async function loadSongs() {
           loadingSongs.value = true;
@@ -425,23 +572,37 @@
 
         async function uploadSong() {
           uploadError.value = '';
-          if (!uploadName.value || !uploadFile.value) return;
+          if (!uploadName.value) return;
+          if (uploadType.value === 'track' && !uploadFile.value) return;
+          if (uploadType.value === 'audiobook' && uploadChapters.value.length === 0) return;
+
           uploading.value = true;
           nfcBannerDismissed.value = false;
           try {
             const form = new FormData();
+            form.append('type', uploadType.value);
             form.append('name', uploadName.value);
-            form.append('file', uploadFile.value);
             form.append('image_url', uploadImageUrl.value);
+
+            if (uploadType.value === 'audiobook') {
+              form.append('chapter_names', JSON.stringify(uploadChapters.value.map(ch => ch.name)));
+              for (const ch of uploadChapters.value) {
+                form.append('files[]', ch.file);
+              }
+            } else {
+              form.append('file', uploadFile.value);
+            }
+
             const res = await fetch(`${API}/songs`, { method: 'POST', body: form });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || 'Upload failed');
+
             // Reset form
             uploadName.value = '';
             uploadFile.value = null;
             uploadImageUrl.value = '';
+            uploadChapters.value = [];
             showUpload.value = false;
-            // Start polling NFC status
             await pollNfcStatus();
             startNfcPoll();
           } catch (e) {
@@ -502,7 +663,10 @@
         }
 
         async function deleteSong(song) {
-          if (!confirm(`Delete "${song.name}"?`)) return;
+          const msg = song.type === 'audiobook'
+            ? `Delete audiobook "${song.name}"?\n\nThis will permanently delete the entire folder and all ${song.chapters.length} chapter files from the Pi.`
+            : `Delete "${song.name}"?`;
+          if (!confirm(msg)) return;
           deletingId.value = song.id;
           songError.value = '';
           try {
@@ -549,6 +713,9 @@
           songs, loadingSongs, songError, playStatus, playingId, deletingId, retaggingId,
           showUpload, uploadName, uploadFile, uploadImageUrl,
           uploading, uploadError,
+          scanning, scanResult, scanImports,
+          expandedId, toggleChapters,
+          uploadType, uploadChapters, setUploadType, onAudiobookFilesChange,
           onFileChange, uploadSong, playSong, deleteSong, retagSong,
           toggleOffline, formatDate,
         };

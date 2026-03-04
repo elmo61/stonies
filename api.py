@@ -1,6 +1,8 @@
 import json
 import os
+import re
 import secrets
+import shutil
 from datetime import datetime
 
 import pychromecast
@@ -8,10 +10,74 @@ from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
-from nfc_daemon import cast_song, lookup_song
+from nfc_daemon import cast_audiobook, cast_song, lookup_song
 
 
-def create_app(state, songs_lock, config_lock, music_folder, songs_path, config_path, pi_ip):
+AUDIO_EXTS = (".mp3", ".m4a")
+
+
+def derive_track_name(filename):
+    """Derive a display name from an audio filename."""
+    name = filename.rsplit(".", 1)[0]
+    name = re.sub(r'^CH\d+[\s\-_]+', '', name, flags=re.IGNORECASE)
+    name = name.replace("-", " ").replace("_", " ")
+    name = re.sub(r'\s+', ' ', name).strip()
+    name = name.title()
+    name = re.sub(r"(\w)'S\b", r"\1's", name)
+    return name or filename.rsplit(".", 1)[0]
+
+
+def derive_book_name(folder_name):
+    """Derive a display name from a folder name."""
+    name = re.sub(r'^\d+[\s\-_]+', '', folder_name)
+    name = name.replace("-", " ").replace("_", " ")
+    name = re.sub(r'\s+', ' ', name).strip()
+    name = name.title()
+    name = re.sub(r"(\w)'S\b", r"\1's", name)
+    return name or folder_name
+
+
+def scan_audiobooks(music_folder, existing_songs):
+    """Scan music_folder for subdirectories not already in existing_songs.
+    Returns a list of new audiobook entries to append."""
+    existing_folders = {s.get("folder") for s in existing_songs if s.get("type") == "audiobook"}
+    new_entries = []
+
+    try:
+        entries = os.listdir(music_folder)
+    except Exception:
+        return []
+
+    for entry in sorted(entries):
+        entry_path = os.path.join(music_folder, entry)
+        if not os.path.isdir(entry_path):
+            continue
+        if entry in existing_folders:
+            continue
+
+        try:
+            files = sorted([f for f in os.listdir(entry_path) if f.lower().endswith(AUDIO_EXTS)])
+        except Exception:
+            continue
+
+        if not files:
+            continue
+
+        chapters = [{"filename": f, "name": derive_track_name(f)} for f in files]
+        new_entries.append({
+            "id": secrets.token_hex(3),
+            "type": "audiobook",
+            "name": derive_book_name(entry),
+            "folder": entry,
+            "chapters": chapters,
+            "image_url": "",
+            "uploaded_at": datetime.now().isoformat(timespec="seconds"),
+        })
+
+    return new_entries
+
+
+def create_app(state, songs_lock, config_lock, music_folder, import_folder, songs_path, config_path, pi_ip):
     base_dir = os.path.dirname(os.path.abspath(__file__))
     app = Flask(__name__, static_folder=base_dir, static_url_path="")
     CORS(app)
@@ -28,13 +94,15 @@ def create_app(state, songs_lock, config_lock, music_folder, songs_path, config_
     # Audio serving
     # ------------------------------------------------------------------
 
-    @app.route("/music/<filename>")
+    @app.route("/music/<path:filename>")
     def serve_music(filename):
-        safe = os.path.basename(filename)
-        file_path = os.path.join(music_folder, safe)
+        file_path = os.path.realpath(os.path.join(music_folder, filename))
+        music_root = os.path.realpath(music_folder)
+        if not file_path.startswith(music_root + os.sep) and file_path != music_root:
+            return jsonify({"error": "Forbidden"}), 403
         if not os.path.isfile(file_path):
             return jsonify({"error": "Track not found"}), 404
-        ext = safe.rsplit(".", 1)[-1].lower() if "." in safe else ""
+        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
         mime = "audio/mp4" if ext == "m4a" else "audio/mpeg"
         return send_file(file_path, mimetype=mime, conditional=True)
 
@@ -95,36 +163,75 @@ def create_app(state, songs_lock, config_lock, music_folder, songs_path, config_
                     songs = json.load(f)
             except Exception:
                 songs = []
+            new_audiobooks = scan_audiobooks(music_folder, songs)
+            if new_audiobooks:
+                songs.extend(new_audiobooks)
+                with open(songs_path, "w") as f:
+                    json.dump(songs, f, indent=2)
         return jsonify({"songs": songs})
 
     @app.route("/api/songs", methods=["POST"])
     def add_song():
         name = request.form.get("name", "").strip()
         image_url = request.form.get("image_url", "").strip()
-        file = request.files.get("file")
+        song_type = request.form.get("type", "track")
 
         if not name:
             return jsonify({"error": "name is required"}), 400
-        if not file or file.filename == "":
-            return jsonify({"error": "file is required"}), 400
-
-        ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
-        if ext not in ("mp3", "m4a"):
-            return jsonify({"error": "Only .mp3 and .m4a files are supported"}), 400
 
         song_id = secrets.token_hex(3)
-        safe_name = secure_filename(file.filename)
-        filename = f"{song_id}_{safe_name}"
-        save_path = os.path.join(music_folder, filename)
-        file.save(save_path)
 
-        song = {
-            "id": song_id,
-            "name": name,
-            "filename": filename,
-            "image_url": image_url,
-            "uploaded_at": datetime.now().isoformat(timespec="seconds"),
-        }
+        if song_type == "audiobook":
+            files = request.files.getlist("files[]")
+            valid = [(secure_filename(f.filename), f) for f in files if f.filename]
+            valid = sorted(valid, key=lambda x: x[0])
+            valid = [(n, f) for n, f in valid if n.rsplit(".", 1)[-1].lower() in ("mp3", "m4a")]
+            if not valid:
+                return jsonify({"error": "At least one .mp3 or .m4a file is required"}), 400
+
+            try:
+                chapter_names = json.loads(request.form.get("chapter_names", "[]"))
+            except Exception:
+                chapter_names = []
+
+            folder_name = song_id
+            folder_path = os.path.join(music_folder, folder_name)
+            os.makedirs(folder_path, exist_ok=True)
+
+            chapters = []
+            for i, (safe_name, file_obj) in enumerate(valid):
+                file_obj.save(os.path.join(folder_path, safe_name))
+                ch_name = chapter_names[i] if i < len(chapter_names) else safe_name.rsplit(".", 1)[0]
+                chapters.append({"filename": safe_name, "name": ch_name})
+
+            song = {
+                "id": song_id,
+                "type": "audiobook",
+                "name": name,
+                "folder": folder_name,
+                "chapters": chapters,
+                "image_url": image_url,
+                "uploaded_at": datetime.now().isoformat(timespec="seconds"),
+            }
+
+        else:
+            file = request.files.get("file")
+            if not file or file.filename == "":
+                return jsonify({"error": "file is required"}), 400
+            ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
+            if ext not in ("mp3", "m4a"):
+                return jsonify({"error": "Only .mp3 and .m4a files are supported"}), 400
+            safe_name = secure_filename(file.filename)
+            filename = f"{song_id}_{safe_name}"
+            file.save(os.path.join(music_folder, filename))
+            song = {
+                "id": song_id,
+                "type": "track",
+                "name": name,
+                "filename": filename,
+                "image_url": image_url,
+                "uploaded_at": datetime.now().isoformat(timespec="seconds"),
+            }
 
         with songs_lock:
             try:
@@ -157,11 +264,93 @@ def create_app(state, songs_lock, config_lock, music_folder, songs_path, config_
                 json.dump(updated, f, indent=2)
 
         if removed:
-            file_path = os.path.join(music_folder, removed.get("filename", ""))
-            if os.path.isfile(file_path):
-                os.remove(file_path)
+            if removed.get("type") == "audiobook":
+                folder_path = os.path.join(music_folder, removed.get("folder", ""))
+                if os.path.isdir(folder_path):
+                    shutil.rmtree(folder_path)
+            else:
+                file_path = os.path.join(music_folder, removed.get("filename", ""))
+                if os.path.isfile(file_path):
+                    os.remove(file_path)
             return jsonify({"ok": True})
         return jsonify({"error": "Song not found"}), 404
+
+    # ------------------------------------------------------------------
+    # Import scan
+    # ------------------------------------------------------------------
+
+    @app.route("/api/import/scan", methods=["POST"])
+    def import_scan():
+        imported = []
+        errors = []
+
+        try:
+            entries = sorted(os.listdir(import_folder))
+        except Exception as e:
+            return jsonify({"error": f"Cannot read import folder: {e}"}), 500
+
+        with songs_lock:
+            try:
+                with open(songs_path, "r") as f:
+                    songs = json.load(f)
+            except Exception:
+                songs = []
+
+            for entry in entries:
+                entry_path = os.path.join(import_folder, entry)
+
+                # Direct audio file → track
+                if os.path.isfile(entry_path) and entry.lower().endswith(AUDIO_EXTS):
+                    try:
+                        song_id = secrets.token_hex(3)
+                        safe_name = secure_filename(entry)
+                        dest_filename = f"{song_id}_{safe_name}"
+                        shutil.move(entry_path, os.path.join(music_folder, dest_filename))
+                        song = {
+                            "id": song_id,
+                            "type": "track",
+                            "name": derive_track_name(entry),
+                            "filename": dest_filename,
+                            "image_url": "",
+                            "uploaded_at": datetime.now().isoformat(timespec="seconds"),
+                        }
+                        songs.append(song)
+                        imported.append({"type": "track", "name": song["name"]})
+                    except Exception as e:
+                        errors.append(f"{entry}: {e}")
+
+                # Subdirectory → audiobook
+                elif os.path.isdir(entry_path):
+                    try:
+                        files = sorted([
+                            f for f in os.listdir(entry_path)
+                            if f.lower().endswith(AUDIO_EXTS)
+                        ])
+                        if not files:
+                            continue
+                        song_id = secrets.token_hex(3)
+                        dest_folder = song_id
+                        shutil.move(entry_path, os.path.join(music_folder, dest_folder))
+                        chapters = [{"filename": f, "name": derive_track_name(f)} for f in files]
+                        song = {
+                            "id": song_id,
+                            "type": "audiobook",
+                            "name": derive_book_name(entry),
+                            "folder": dest_folder,
+                            "chapters": chapters,
+                            "image_url": "",
+                            "uploaded_at": datetime.now().isoformat(timespec="seconds"),
+                        }
+                        songs.append(song)
+                        imported.append({"type": "audiobook", "name": song["name"], "chapters": len(chapters)})
+                    except Exception as e:
+                        errors.append(f"{entry}: {e}")
+
+            if imported:
+                with open(songs_path, "w") as f:
+                    json.dump(songs, f, indent=2)
+
+        return jsonify({"imported": imported, "errors": errors, "songs": songs})
 
     # ------------------------------------------------------------------
     # NFC status / cancel
@@ -199,9 +388,14 @@ def create_app(state, songs_lock, config_lock, music_folder, songs_path, config_
                 with open(songs_path, "w") as f:
                     json.dump(updated, f, indent=2)
             if removed:
-                file_path = os.path.join(music_folder, removed.get("filename", ""))
-                if os.path.isfile(file_path):
-                    os.remove(file_path)
+                if removed.get("type") == "audiobook":
+                    folder_path = os.path.join(music_folder, removed.get("folder", ""))
+                    if os.path.isdir(folder_path):
+                        shutil.rmtree(folder_path)
+                else:
+                    file_path = os.path.join(music_folder, removed.get("filename", ""))
+                    if os.path.isfile(file_path):
+                        os.remove(file_path)
 
         return jsonify({"ok": True})
 
@@ -242,7 +436,10 @@ def create_app(state, songs_lock, config_lock, music_folder, songs_path, config_
             return jsonify({"error": "Song not found"}), 404
 
         try:
-            cast_song(song, config_path, config_lock, pi_ip)
+            if song.get("type") == "audiobook":
+                cast_audiobook(song, config_path, config_lock, pi_ip)
+            else:
+                cast_song(song, config_path, config_lock, pi_ip)
             return jsonify({"ok": True, "message": f"Now playing '{song['name']}'"})
         except Exception as e:
             return jsonify({"error": str(e)}), 500

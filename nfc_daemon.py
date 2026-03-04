@@ -150,6 +150,68 @@ def lookup_song(id_str, songs_path, songs_lock):
     return None
 
 
+def cast_audiobook(song, config_path, config_lock, pi_ip):
+    """Queue all chapters of an audiobook on the configured speaker. Raises on any failure."""
+    import pychromecast
+    from urllib.parse import quote
+
+    with config_lock:
+        try:
+            with open(config_path, "r") as f:
+                config = json.load(f)
+        except Exception:
+            config = {}
+
+    speaker_name = config.get("speaker", "").strip()
+    if not speaker_name:
+        raise RuntimeError("No speaker configured")
+
+    folder = song.get("folder", "")
+    chapters = song.get("chapters", [])
+    if not chapters:
+        raise RuntimeError("Audiobook has no chapters")
+
+    queue_items = []
+    for i, ch in enumerate(chapters):
+        url = f"http://{pi_ip}:5000/music/{quote(folder)}/{quote(ch['filename'])}"
+        filename = ch["filename"]
+        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+        mime = "audio/mp4" if ext == "m4a" else "audio/mpeg"
+        queue_items.append({
+            "autoplay": True,
+            "preloadTime": 3,
+            "media": {
+                "contentId": url,
+                "contentType": mime,
+                "streamType": "BUFFERED",
+                "metadata": {
+                    "metadataType": 0,
+                    "title": ch.get("name", f"Chapter {i + 1}"),
+                },
+            },
+        })
+
+    chromecasts, browser = pychromecast.get_listed_chromecasts(
+        friendly_names=[speaker_name]
+    )
+    if not chromecasts:
+        raise RuntimeError(f"Speaker '{speaker_name}' not found")
+
+    cast = chromecasts[0]
+    cast.wait()
+    cast.media_controller.send_message(
+        {
+            "type": "QUEUE_LOAD",
+            "repeatMode": "REPEAT_OFF",
+            "startIndex": 0,
+            "currentTime": 0,
+            "items": queue_items,
+        },
+        inc_session_id=True,
+    )
+    cast.media_controller.block_until_active()
+
+
 def cast_song(song, config_path, config_lock, pi_ip):
     """Cast a song to the configured speaker. Raises on any failure."""
     import pychromecast
@@ -221,7 +283,10 @@ def run_daemon(state, songs_path, songs_lock, config_path, config_lock, pi_ip):
                             else:
                                 print(f"[NFC] Casting '{song['name']}'...")
                                 try:
-                                    cast_song(song, config_path, config_lock, pi_ip)
+                                    if song.get("type") == "audiobook":
+                                        cast_audiobook(song, config_path, config_lock, pi_ip)
+                                    else:
+                                        cast_song(song, config_path, config_lock, pi_ip)
                                     print(f"[NFC] Now playing '{song['name']}'")
                                 except Exception as e:
                                     print(f"[NFC] Cast error: {e}")
