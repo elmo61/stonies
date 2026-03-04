@@ -6,16 +6,87 @@
   <title>Stonies</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css" />
   <style>
-    body { background-color: #f5f5f5; }
-    .hero { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); }
-    .song-row td { vertical-align: middle; }
-    .song-thumb { width: 40px; height: 40px; object-fit: cover; border-radius: 4px; }
-    .spin {
-      animation: spin 1s linear infinite;
-      display: inline-block;
+    /* ── Page ─────────────────────────────────────────────── */
+    body {
+      background: linear-gradient(160deg, #e8edf8 0%, #f2f4f9 50%, #f5f5f5 100%);
+      min-height: 100vh;
     }
+
+    /* ── Hero ─────────────────────────────────────────────── */
+    .hero {
+      background: linear-gradient(135deg, #1a1a2e 0%, #0f3460 55%, #16213e 100%);
+    }
+    .hero .title { letter-spacing: 0.03em; }
+
+    /* ── Boxes ────────────────────────────────────────────── */
+    .box { box-shadow: 0 2px 12px rgba(0,0,0,0.06); border-radius: 10px; }
+
+    /* ── Settings summary bar ─────────────────────────────── */
+    .settings-bar {
+      background: linear-gradient(135deg, #f8f9ff 0%, #ffffff 100%);
+      border: 1px solid #e2e7f3;
+    }
+
+    /* ── Now-playing bar (sticky) ─────────────────────────── */
+    .now-playing-bar {
+      position: sticky;
+      top: 0;
+      z-index: 40;
+      background: linear-gradient(135deg, #0f3460, #1a1a2e);
+      border-radius: 10px;
+      box-shadow: 0 4px 24px rgba(15,52,96,0.4);
+      color: white;
+      padding: 0.75rem 1.1rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 1rem;
+    }
+    .now-playing-bar .tag { opacity: 0.85; }
+
+    /* ── Song table ───────────────────────────────────────── */
+    .song-row td { vertical-align: middle; padding: 0.65rem 0.5rem; border-bottom: 1px solid #f0f0f5; }
+    .song-row { transition: box-shadow 0.12s; }
+    .song-row:hover td { background: #f0f5ff; }
+    .song-row:hover { box-shadow: inset 3px 0 0 #3273dc; }
+    .song-row.is-audiobook td { background: #fffdf5; }
+    .song-row.is-audiobook { box-shadow: inset 3px 0 0 #f0a500; }
+    .song-row.is-audiobook:hover td { background: #fff8e8; }
+    .song-row.is-audiobook:hover { box-shadow: inset 3px 0 0 #d4860a; }
+
+    /* ── Song icon / thumbnail ────────────────────────────── */
+    .song-icon {
+      width: 48px; height: 48px;
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.5rem;
+      flex-shrink: 0;
+    }
+    .song-icon.is-track   { background: #e8eeff; }
+    .song-icon.is-audiobook { background: #fff0cc; }
+    .song-thumb { width: 48px; height: 48px; object-fit: cover; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
+
+    /* ── Song name ────────────────────────────────────────── */
+    .song-name { font-size: 0.97rem; font-weight: 600; color: #222; }
+    .song-meta { font-size: 0.75rem; color: #888; margin-top: 1px; }
+
+    /* ── Chapter list ─────────────────────────────────────── */
+    .chapter-list { list-style: none; padding: 0; margin: 0.4rem 0 0 0; }
+    .chapter-list li { display: flex; align-items: center; gap: 6px; padding: 0.2rem 0; border-top: 1px solid #f0f0f5; font-size: 0.8rem; color: #555; }
+    .chapter-list li:first-child { border-top: none; }
+
+    /* ── Activity log ─────────────────────────────────────── */
+    .activity-log {
+      max-height: 180px; overflow-y: auto;
+      font-family: 'Courier New', monospace; font-size: 0.78rem;
+      background: #13111c; color: #c9d1d9;
+      border-radius: 6px; padding: 0.7rem 0.9rem; line-height: 1.7;
+    }
+
+    /* ── Misc ─────────────────────────────────────────────── */
+    .spin { animation: spin 1s linear infinite; display: inline-block; }
     @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-    .upload-form { border-top: 1px solid #dbdbdb; margin-top: 1rem; padding-top: 1rem; }
+    .upload-form { border-top: 1px solid #e8e8e8; margin-top: 1rem; padding-top: 1.25rem; }
   </style>
 </head>
 <body>
@@ -49,6 +120,23 @@
 
     <div class="container" style="max-width: 860px;">
 
+      <!-- Now playing (sticky) -->
+      <div v-if="playbackStatus.playing" class="now-playing-bar">
+        <span>
+          <span>▶</span>
+          <strong class="ml-2">{{ playbackStatus.song_name || 'Unknown' }}</strong>
+          <span v-if="playbackStatus.chapter_index != null" class="ml-2" style="opacity:0.75; font-size:0.88rem;">
+            Ch {{ playbackStatus.chapter_index + 1 }}<span v-if="playbackStatus.current_time"> · {{ formatTime(playbackStatus.current_time) }}</span>
+          </span>
+          <span v-else-if="playbackStatus.current_time" class="ml-2" style="opacity:0.75; font-size:0.88rem;">· {{ formatTime(playbackStatus.current_time) }}</span>
+          <span class="tag is-warning is-light is-small ml-2">{{ playbackStatus.player_state }}</span>
+          <span v-if="nfcStatus.sleep_stops_at" class="tag is-info is-light is-small ml-1" :title="'Stops at ' + nfcStatus.sleep_stops_at">
+            🌙 {{ formatSleepCountdown(nfcStatus.sleep_stops_at) }}
+          </span>
+        </span>
+        <button class="button is-danger is-small" :class="{'is-loading': stopping}" @click="stopPlayback">■ Stop</button>
+      </div>
+
       <!-- Offline mode toggle -->
       <div class="mb-4">
         <button
@@ -69,24 +157,6 @@
         </span>
         {{ nfcStatus.last_seen_song.name }}
         <small class="has-text-grey ml-2">({{ nfcStatus.last_seen_song.id }})</small>
-      </div>
-
-      <!-- Now playing / stop bar -->
-      <div v-if="playbackStatus.playing" class="notification is-dark mb-4" style="display: flex; align-items: center; justify-content: space-between; padding: 0.75rem 1rem;">
-        <span>
-          <span style="font-size: 1rem;">▶</span>
-          <strong class="ml-2">{{ playbackStatus.song_name || 'Unknown' }}</strong>
-          <span v-if="playbackStatus.chapter_index != null" class="has-text-grey-light ml-2">
-            · Ch {{ playbackStatus.chapter_index + 1 }}
-            <span v-if="playbackStatus.current_time"> · {{ formatTime(playbackStatus.current_time) }}</span>
-          </span>
-          <span v-else-if="playbackStatus.current_time" class="has-text-grey-light ml-2">· {{ formatTime(playbackStatus.current_time) }}</span>
-          <span class="tag is-warning is-light is-small ml-2">{{ playbackStatus.player_state }}</span>
-          <span v-if="nfcStatus.sleep_stops_at" class="tag is-info is-light is-small ml-2" :title="'Stops at ' + nfcStatus.sleep_stops_at">
-            🌙 {{ formatSleepCountdown(nfcStatus.sleep_stops_at) }}
-          </span>
-        </span>
-        <button class="button is-danger is-small" :class="{'is-loading': stopping}" @click="stopPlayback">■ Stop</button>
       </div>
 
       <!-- NFC status banner (visible when writing) -->
@@ -112,7 +182,7 @@
       </div>
 
       <!-- Settings summary bar -->
-      <div class="box mb-4 px-4 py-3">
+      <div class="box settings-bar mb-4 px-4 py-3">
         <div class="level is-mobile">
           <div class="level-left" style="gap: 1rem; flex-wrap: wrap;">
             <span>
@@ -231,6 +301,15 @@
           <p v-if="uploadError" class="help is-danger">{{ uploadError }}</p>
         </div>
 
+        <!-- Search -->
+        <div v-if="songs.length > 0" class="field mb-3">
+          <div class="control has-icons-left has-icons-right">
+            <input class="input" type="text" v-model="searchQuery" placeholder="Search songs and audiobooks..." />
+            <span class="icon is-left" style="pointer-events:none;">🔍</span>
+            <span v-if="searchQuery" class="icon is-right" style="cursor:pointer; pointer-events:all;" @click="searchQuery = ''">✕</span>
+          </div>
+        </div>
+
         <!-- Import scan result -->
         <div v-if="scanResult" class="notification is-success is-light mb-3">
           <button class="delete" @click="scanResult = null"></button>
@@ -253,80 +332,101 @@
         </div>
 
         <!-- Empty -->
-        <div v-else-if="songs.length === 0 && !showUpload" class="has-text-centered py-5 has-text-grey">
+        <div v-else-if="songs.length === 0 && !showUpload && !loadingSongs" class="has-text-centered py-5 has-text-grey">
           <p>No songs yet. Click <strong>+ Add Song</strong> to get started.</p>
         </div>
 
+        <!-- Empty search result -->
+        <div v-if="songs.length > 0 && filteredSongs.length === 0" class="has-text-centered py-4 has-text-grey">
+          No results for "{{ searchQuery }}"
+        </div>
+
         <!-- Song table -->
-        <table v-else-if="songs.length > 0" class="table is-fullwidth is-hoverable">
+        <table v-else-if="filteredSongs.length > 0" class="table is-fullwidth" style="border-collapse:collapse;">
           <tbody>
-            <tr v-for="song in songs" :key="song.id" class="song-row">
-              <td style="width: 50px;">
+            <tr v-for="song in filteredSongs" :key="song.id" class="song-row" :class="{'is-audiobook': song.type === 'audiobook'}">
+
+              <!-- Thumbnail -->
+              <td style="width: 56px; padding-left: 0.75rem;">
                 <img v-if="song.image_url" :src="song.image_url" class="song-thumb" :alt="song.name" />
-                <span v-else-if="song.type === 'audiobook'" style="font-size: 1.5rem;">📚</span>
-                <span v-else class="has-text-grey-light" style="font-size: 1.5rem;">🎵</span>
+                <div v-else-if="song.type === 'audiobook'" class="song-icon is-audiobook">📚</div>
+                <div v-else class="song-icon is-track">🎵</div>
               </td>
+
+              <!-- Name + metadata -->
               <td>
-                <strong>{{ song.name }}</strong>
-                <span v-if="song.type === 'audiobook'" class="tag is-info is-light is-small ml-2">Audiobook</span>
-                <br />
-                <small class="has-text-grey-light">
-                  ID: {{ song.id }}
-                  <span v-if="song.uploaded_at"> · {{ formatDate(song.uploaded_at) }}</span>
-                  <span v-if="song.type === 'audiobook'">
-                    · {{ song.chapters.length }} chapters
-                    <span v-if="song.progress" class="ml-1 has-text-info">
-                      · Ch {{ (song.progress.chapter_index || 0) + 1 }} · {{ formatTime(song.progress.current_time) }}
-                    </span>
-                    <a class="ml-1" @click.prevent="toggleChapters(song.id)" href="#">[{{ expandedId === song.id ? 'hide' : 'show' }}]</a>
-                  </span>
-                  <span v-else class="ml-1">· {{ song.filename }}</span>
-                </small>
-                <ol v-if="song.type === 'audiobook' && expandedId === song.id" class="mt-2 ml-4" style="font-size: 0.8rem; color: #555; list-style: none; padding: 0;">
-                  <li v-for="(ch, i) in song.chapters" :key="ch.filename" class="mb-1" style="display: flex; align-items: center; gap: 6px;">
-                    <button
-                      class="button is-primary is-small py-0"
-                      style="height: 1.4rem; min-width: 2rem; font-size: 0.7rem;"
-                      :class="{'is-loading': playingId === song.id}"
-                      :disabled="!savedSpeaker || playingId !== null || nfcStatus.offline"
-                      @click="playChapter(song, i)"
-                      :title="`Play from chapter ${i + 1}`"
-                    >▶</button>
-                    <span :class="playbackStatus.song_id === song.id && playbackStatus.chapter_index === i ? 'has-text-success has-text-weight-semibold' : ''">
-                      {{ i + 1 }}. {{ ch.name }}
-                      <span v-if="playbackStatus.song_id === song.id && playbackStatus.chapter_index === i" class="has-text-grey ml-1" style="font-size:0.7rem;">
-                        ▶ {{ formatTime(playbackStatus.current_time) }}
+                <!-- View mode -->
+                <template v-if="editingId !== song.id">
+                  <div style="display:flex; align-items:baseline; gap:6px; flex-wrap:wrap;">
+                    <span class="song-name">{{ song.name }}</span>
+                    <span v-if="song.type === 'audiobook'" class="tag is-warning is-light" style="font-size:0.68rem; height:1.4em;">Audiobook</span>
+                  </div>
+                  <div class="song-meta">
+                    {{ song.id }} · {{ formatDate(song.uploaded_at) }}
+                    <template v-if="song.type === 'audiobook'">
+                      · {{ song.chapters.length }} ch
+                      <span v-if="song.progress" class="has-text-info ml-1">· Ch {{ (song.progress.chapter_index||0)+1 }} · {{ formatTime(song.progress.current_time) }}</span>
+                      <a class="ml-1" @click.prevent="toggleChapters(song.id)" href="#" style="color:#aaa;">[{{ expandedId === song.id ? 'hide' : 'show' }}]</a>
+                    </template>
+                    <template v-else>· {{ song.filename }}</template>
+                  </div>
+                  <ul v-if="song.type === 'audiobook' && expandedId === song.id" class="chapter-list mt-2">
+                    <li v-for="(ch, i) in song.chapters" :key="ch.filename">
+                      <button class="button is-primary is-small py-0" style="height:1.4rem; min-width:1.8rem; font-size:0.7rem;"
+                        :class="{'is-loading': playingId === song.id}"
+                        :disabled="!savedSpeaker || playingId !== null || nfcStatus.offline"
+                        @click="playChapter(song, i)" :title="`Play from chapter ${i+1}`">▶</button>
+                      <span :class="playbackStatus.song_id === song.id && playbackStatus.chapter_index === i ? 'has-text-success has-text-weight-semibold' : ''">
+                        {{ i+1 }}. {{ ch.name }}
+                        <span v-if="playbackStatus.song_id === song.id && playbackStatus.chapter_index === i" style="font-size:0.7rem; color:#888;"> ▶ {{ formatTime(playbackStatus.current_time) }}</span>
                       </span>
-                    </span>
-                  </li>
-                </ol>
+                    </li>
+                  </ul>
+                </template>
+
+                <!-- Edit / rename mode -->
+                <template v-else>
+                  <div class="field has-addons mb-0">
+                    <div class="control is-expanded">
+                      <input class="input is-small" type="text" v-model="editingName"
+                        @keyup.enter="saveRename(song)" @keyup.escape="cancelRename()"
+                        style="font-weight:600;" autofocus />
+                    </div>
+                    <div class="control">
+                      <button class="button is-success is-small" @click="saveRename(song)" :disabled="!editingName.trim()">✓</button>
+                    </div>
+                    <div class="control">
+                      <button class="button is-light is-small" @click="cancelRename()">✕</button>
+                    </div>
+                  </div>
+                  <p v-if="renameError" class="help is-danger mb-0">{{ renameError }}</p>
+                </template>
               </td>
-              <td style="width: 180px; text-align: right;">
-                <div class="buttons is-right">
-                  <button
-                    class="button is-primary is-small"
+
+              <!-- Actions -->
+              <td style="width: 160px; text-align: right; white-space: nowrap;">
+                <div class="buttons is-right" style="flex-wrap:nowrap; gap:3px;">
+                  <button class="button is-primary is-small"
                     :class="{'is-loading': playingId === song.id}"
                     :disabled="!savedSpeaker || playingId !== null || nfcStatus.offline"
                     @click="playSong(song)"
-                    :title="nfcStatus.offline ? 'Go online to play' : !savedSpeaker ? 'Save a speaker first' : song.type === 'audiobook' && song.progress ? `Resume Ch ${(song.progress.chapter_index||0)+1} on ${savedSpeaker}` : 'Play on ' + savedSpeaker"
-                  >
-                    ▶ Play
+                    :title="nfcStatus.offline ? 'Go online to play' : !savedSpeaker ? 'Save a speaker first' : song.type === 'audiobook' && song.progress ? `Resume Ch ${(song.progress.chapter_index||0)+1} on ${savedSpeaker}` : 'Play on ' + savedSpeaker">
+                    ▶
                   </button>
-                  <button
-                    class="button is-info is-small is-outlined"
+                  <button class="button is-light is-small"
+                    :disabled="editingId === song.id"
+                    @click="startRename(song)" title="Rename">
+                    ✏️
+                  </button>
+                  <button class="button is-info is-small is-outlined"
                     :class="{'is-loading': retaggingId === song.id}"
                     :disabled="nfcStatus.mode === 'writing'"
-                    @click="retagSong(song)"
-                    title="Write tag for this song"
-                  >
-                    🏷 Tag
+                    @click="retagSong(song)" title="Write NFC tag">
+                    🏷
                   </button>
-                  <button
-                    class="button is-danger is-small is-outlined"
+                  <button class="button is-danger is-small is-outlined"
                     :disabled="deletingId === song.id"
-                    @click="deleteSong(song)"
-                    title="Delete"
-                  >
+                    @click="deleteSong(song)" title="Delete">
                     ✕
                   </button>
                 </div>
@@ -343,7 +443,7 @@
       <div class="box mt-4 mb-2">
         <h2 class="title is-6 mb-3">NFC Activity</h2>
         <div
-          style="max-height: 180px; overflow-y: auto; font-family: monospace; font-size: 0.78rem; background: #1a1a2e; color: #d0d0e0; border-radius: 4px; padding: 0.6rem 0.8rem;"
+          class="activity-log"
         >
           <div v-if="activityLog.length === 0" class="has-text-grey" style="font-style: italic;">No activity yet...</div>
           <div v-for="entry in [...activityLog].reverse()" :key="entry.seq" style="line-height: 1.6;">
@@ -439,7 +539,7 @@
 
   <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
   <script>
-    const { createApp, ref, computed, onMounted, onUnmounted } = Vue;
+    const { createApp, ref, computed, onMounted, onUnmounted, nextTick } = Vue;
 
     createApp({
       setup() {
@@ -656,6 +756,7 @@
         }
 
         async function pollPlayback() {
+          if (playbackPollTimer) { clearTimeout(playbackPollTimer); playbackPollTimer = null; }
           try {
             const res = await fetch(`${API}/playback/status`);
             const data = await res.json();
@@ -666,11 +767,14 @@
               if (song) song.progress = data.progress;
             }
           } catch (_) {}
+          // Poll faster when something is playing, slower when idle
+          const interval = playbackStatus.value.playing ? 10000 : 30000;
+          playbackPollTimer = setTimeout(pollPlayback, interval);
         }
 
         function startPlaybackPoll() {
-          if (playbackPollTimer) clearInterval(playbackPollTimer);
-          playbackPollTimer = setInterval(pollPlayback, 30000);
+          if (playbackPollTimer) { clearTimeout(playbackPollTimer); playbackPollTimer = null; }
+          playbackPollTimer = setTimeout(pollPlayback, 5000);
         }
 
         // --- Import scan ---
@@ -713,6 +817,52 @@
         const expandedId = ref(null);
         function toggleChapters(id) {
           expandedId.value = expandedId.value === id ? null : id;
+        }
+
+        // --- Search / filter ---
+        const searchQuery = ref('');
+        const filteredSongs = computed(() => {
+          const q = searchQuery.value.trim().toLowerCase();
+          if (!q) return songs.value;
+          return songs.value.filter(s =>
+            s.name.toLowerCase().includes(q) ||
+            (s.chapters && s.chapters.some(ch => ch.name.toLowerCase().includes(q)))
+          );
+        });
+
+        // --- Inline rename ---
+        const editingId = ref(null);
+        const editingName = ref('');
+        const renameError = ref('');
+
+        function startRename(song) {
+          editingId.value = song.id;
+          editingName.value = song.name;
+          renameError.value = '';
+        }
+
+        async function saveRename(song) {
+          if (!editingName.value.trim()) return;
+          renameError.value = '';
+          try {
+            const res = await fetch(`${API}/songs/${song.id}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name: editingName.value.trim() }),
+            });
+            const data = await res.json();
+            if (data.error) throw new Error(data.error);
+            song.name = data.name;
+            editingId.value = null;
+          } catch (e) {
+            renameError.value = e.message;
+          }
+        }
+
+        function cancelRename() {
+          editingId.value = null;
+          editingName.value = '';
+          renameError.value = '';
         }
 
         // --- Songs ---
@@ -942,13 +1092,12 @@
           await pollNfcStatus();
           startBgPoll();
           startPlaybackPoll();
-          pollPlayback();
         });
 
         onUnmounted(() => {
           stopNfcPoll();
           if (bgPollTimer) clearInterval(bgPollTimer);
-          if (playbackPollTimer) clearInterval(playbackPollTimer);
+          if (playbackPollTimer) { clearTimeout(playbackPollTimer); playbackPollTimer = null; }
         });
 
         return {
@@ -970,6 +1119,8 @@
           scanning, scanResult, scanImports,
           activityLog,
           expandedId, toggleChapters,
+          searchQuery, filteredSongs,
+          editingId, editingName, renameError, startRename, saveRename, cancelRename,
           uploadType, uploadChapters, setUploadType, onAudiobookFilesChange,
           onFileChange, uploadSong, playSong, playChapter, deleteSong, retagSong,
           toggleOffline, formatDate,

@@ -251,6 +251,28 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, song
         state.request_write(song_id)
         return jsonify({"id": song_id, "status": "pending"}), 202
 
+    @app.route("/api/songs/<song_id>", methods=["PATCH"])
+    def rename_song(song_id):
+        body = request.get_json(silent=True) or {}
+        name = body.get("name", "").strip()
+        if not name:
+            return jsonify({"error": "name is required"}), 400
+        with songs_lock:
+            try:
+                with open(songs_path, "r") as f:
+                    songs = json.load(f)
+            except Exception:
+                songs = []
+            for s in songs:
+                if s.get("id") == song_id:
+                    s["name"] = name
+                    break
+            else:
+                return jsonify({"error": "Song not found"}), 404
+            with open(songs_path, "w") as f:
+                json.dump(songs, f, indent=2)
+        return jsonify({"ok": True, "name": name})
+
     @app.route("/api/songs/<song_id>", methods=["DELETE"])
     def delete_song(song_id):
         removed = None
