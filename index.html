@@ -111,63 +111,26 @@
         </span>
       </div>
 
-      <!-- Speaker box -->
-      <div class="box mb-4">
-        <h2 class="title is-5 mb-3">Speaker</h2>
-        <div class="field has-addons mb-2">
-          <div class="control is-expanded">
-            <div class="select is-fullwidth" :class="{'is-loading': loadingSpeakers}">
-              <select v-model="selectedSpeaker" :disabled="loadingSpeakers || speakers.length === 0">
-                <option value="" disabled>
-                  {{ loadingSpeakers ? 'Scanning network...' : speakers.length === 0 ? 'No speakers found' : 'Select a speaker' }}
-                </option>
-                <option v-for="s in speakers" :key="s" :value="s">{{ s }}</option>
-              </select>
-            </div>
+      <!-- Settings summary bar -->
+      <div class="box mb-4 px-4 py-3">
+        <div class="level is-mobile">
+          <div class="level-left" style="gap: 1rem; flex-wrap: wrap;">
+            <span>
+              🔊
+              <strong v-if="savedSpeaker">{{ savedSpeaker }}</strong>
+              <span v-else class="has-text-grey-light">No speaker set</span>
+            </span>
+            <span class="has-text-grey-light" aria-hidden="true">·</span>
+            <span v-if="sleepTimer.enabled" class="has-text-grey">
+              🌙 After {{ sleepTimer.after_time }}, {{ sleepTimer.duration_minutes }} min
+            </span>
+            <span v-else class="has-text-grey-light">🌙 Sleep timer off</span>
           </div>
-          <div class="control">
-            <button class="button is-light" @click="loadSpeakers" :disabled="loadingSpeakers" title="Refresh speakers">
-              <span :class="loadingSpeakers ? 'spin' : ''">⟳</span>
+          <div class="level-right">
+            <button class="button is-light is-small" @click="openSettings" title="Settings">
+              ⚙️ Settings
             </button>
           </div>
-          <div class="control">
-            <button class="button is-info" @click="saveSpeaker" :disabled="!selectedSpeaker || savingSpeaker">
-              {{ savingSpeaker ? 'Saving...' : 'Save' }}
-            </button>
-          </div>
-        </div>
-        <p v-if="savedSpeaker" class="help is-success">Saved: {{ savedSpeaker }}</p>
-        <p v-if="speakerError" class="help is-danger">{{ speakerError }}</p>
-
-        <hr style="margin: 0.75rem 0;" />
-
-        <h3 class="title is-6 mb-3">🌙 Bedtime Sleep Timer</h3>
-        <div class="field">
-          <label class="checkbox">
-            <input type="checkbox" v-model="sleepTimer.enabled" class="mr-1" />
-            Stop playback automatically at night
-          </label>
-        </div>
-        <div v-if="sleepTimer.enabled" class="columns is-mobile is-vcentered mb-0">
-          <div class="column is-narrow">
-            <label class="label is-small mb-1">Active after</label>
-            <input class="input is-small" type="time" v-model="sleepTimer.after_time" style="width: 110px;" />
-          </div>
-          <div class="column is-narrow">
-            <label class="label is-small mb-1">Stop after</label>
-            <div class="field has-addons mb-0">
-              <div class="control">
-                <input class="input is-small" type="number" v-model.number="sleepTimer.duration_minutes" min="1" max="240" style="width: 70px;" />
-              </div>
-              <div class="control">
-                <span class="button is-static is-small">min</span>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="mt-2">
-          <button class="button is-small is-info" :class="{'is-loading': savingSleep}" @click="saveSleepTimer">Save</button>
-          <span v-if="sleepSaveStatus" class="help is-success ml-2" style="display:inline;">{{ sleepSaveStatus }}</span>
         </div>
       </div>
 
@@ -394,7 +357,85 @@
       </p>
 
     </div>
+
+  <!-- Settings modal -->
+  <div class="modal" :class="{'is-active': showSettings}">
+    <div class="modal-background" @click="showSettings = false"></div>
+    <div class="modal-card" style="max-width: 480px; width: 90%;">
+      <header class="modal-card-head">
+        <p class="modal-card-title">⚙️ Settings</p>
+        <button class="delete" aria-label="close" @click="showSettings = false"></button>
+      </header>
+      <section class="modal-card-body">
+
+        <h3 class="title is-6 mb-3">🔊 Speaker</h3>
+        <div class="field has-addons mb-2">
+          <div class="control is-expanded">
+            <div class="select is-fullwidth" :class="{'is-loading': loadingSpeakers}">
+              <select v-model="selectedSpeaker" :disabled="loadingSpeakers || speakers.length === 0">
+                <option value="" disabled>
+                  {{ loadingSpeakers ? 'Scanning network...' : speakers.length === 0 ? 'No speakers found' : 'Select a speaker' }}
+                </option>
+                <option v-for="s in speakers" :key="s" :value="s">{{ s }}</option>
+              </select>
+            </div>
+          </div>
+          <div class="control">
+            <button class="button is-light" @click="loadSpeakers" :disabled="loadingSpeakers" title="Scan for speakers">
+              <span :class="loadingSpeakers ? 'spin' : ''">⟳</span>
+            </button>
+          </div>
+        </div>
+        <div class="field">
+          <button class="button is-info is-fullwidth" @click="saveSpeaker" :disabled="!selectedSpeaker || savingSpeaker">
+            {{ savingSpeaker ? 'Saving...' : 'Save Speaker' }}
+          </button>
+        </div>
+        <p v-if="savedSpeaker" class="help is-success mb-2">Active: {{ savedSpeaker }}</p>
+        <p v-if="speakerError" class="help is-danger mb-2">{{ speakerError }}</p>
+
+        <hr />
+
+        <h3 class="title is-6 mb-3">🌙 Bedtime Sleep Timer</h3>
+        <div class="field">
+          <label class="checkbox">
+            <input type="checkbox" v-model="sleepTimer.enabled" class="mr-2" />
+            Stop playback automatically at night
+          </label>
+        </div>
+        <div v-if="sleepTimer.enabled" class="columns is-mobile is-vcentered">
+          <div class="column">
+            <label class="label is-small mb-1">Active after</label>
+            <input class="input" type="time" v-model="sleepTimer.after_time" />
+          </div>
+          <div class="column is-narrow">
+            <label class="label is-small mb-1">Stop after</label>
+            <div class="field has-addons mb-0">
+              <div class="control">
+                <input class="input" type="number" v-model.number="sleepTimer.duration_minutes" min="1" max="240" style="width: 75px;" />
+              </div>
+              <div class="control">
+                <span class="button is-static">min</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="field">
+          <button class="button is-info is-fullwidth" :class="{'is-loading': savingSleep}" @click="saveSleepTimer">
+            Save Sleep Timer
+          </button>
+        </div>
+        <p v-if="sleepSaveStatus" class="help is-success mb-0">{{ sleepSaveStatus }}</p>
+
+      </section>
+      <footer class="modal-card-foot" style="justify-content: flex-end;">
+        <button class="button" @click="showSettings = false">Close</button>
+      </footer>
+    </div>
   </div>
+
+  </div>
+</div>
 
   <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
   <script>
@@ -429,6 +470,13 @@
           } finally {
             loadingSpeakers.value = false;
           }
+        }
+
+        const showSettings = ref(false);
+
+        function openSettings() {
+          showSettings.value = true;
+          if (speakers.value.length === 0) loadSpeakers();
         }
 
         const sleepTimer = ref({ enabled: false, after_time: '19:00', duration_minutes: 60 });
@@ -916,6 +964,7 @@
           songs, loadingSongs, songError, playStatus, playingId, deletingId, retaggingId,
           showUpload, uploadName, uploadFile, uploadImageUrl,
           uploading, uploadError,
+          showSettings, openSettings,
           playbackStatus, formatTime, stopping, stopPlayback,
           sleepTimer, savingSleep, sleepSaveStatus, saveSleepTimer, formatSleepCountdown,
           scanning, scanResult, scanImports,
