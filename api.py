@@ -477,8 +477,6 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, song
             chromecasts, browser = pychromecast.get_listed_chromecasts(
                 friendly_names=[speaker_name]
             )
-            if browser:
-                pychromecast.discovery.stop_discovery(browser)
             if not chromecasts:
                 return jsonify({"playing": False})
 
