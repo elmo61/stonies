@@ -585,6 +585,7 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, song
             return jsonify({"error": "No speaker configured"}), 400
 
         try:
+            import time as _time
             chromecasts, browser = pychromecast.get_listed_chromecasts(
                 friendly_names=[speaker_name]
             )
@@ -592,7 +593,10 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, song
                 return jsonify({"error": f"Speaker '{speaker_name}' not found"}), 404
             cast = chromecasts[0]
             cast.wait(timeout=5)
-            cast.media_controller.stop()
+            mc = cast.media_controller
+            mc.update_status()
+            _time.sleep(1)
+            mc.stop()
             state.add_log(f"Playback stopped on \"{speaker_name}\"")
             return jsonify({"ok": True})
         except Exception as e:
