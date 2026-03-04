@@ -71,6 +71,21 @@
         <small class="has-text-grey ml-2">({{ nfcStatus.last_seen_song.id }})</small>
       </div>
 
+      <!-- Now playing / stop bar -->
+      <div v-if="playbackStatus.playing" class="notification is-dark mb-4" style="display: flex; align-items: center; justify-content: space-between; padding: 0.75rem 1rem;">
+        <span>
+          <span style="font-size: 1rem;">▶</span>
+          <strong class="ml-2">{{ playbackStatus.song_name || 'Unknown' }}</strong>
+          <span v-if="playbackStatus.chapter_index != null" class="has-text-grey-light ml-2">
+            · Ch {{ playbackStatus.chapter_index + 1 }}
+            <span v-if="playbackStatus.current_time"> · {{ formatTime(playbackStatus.current_time) }}</span>
+          </span>
+          <span v-else-if="playbackStatus.current_time" class="has-text-grey-light ml-2">· {{ formatTime(playbackStatus.current_time) }}</span>
+          <span class="tag is-warning is-light is-small ml-2">{{ playbackStatus.player_state }}</span>
+        </span>
+        <button class="button is-danger is-small" :class="{'is-loading': stopping}" @click="stopPlayback">■ Stop</button>
+      </div>
+
       <!-- NFC status banner (visible when writing) -->
       <div v-if="nfcStatus.mode === 'writing' || nfcBannerDismissed === false && nfcStatus.sub_state === 'success'" class="notification mb-4" :class="nfcBannerClass">
         <button class="delete" @click="dismissNfcBanner"></button>
@@ -506,6 +521,22 @@
           return `${m}:${s.toString().padStart(2, '0')}`;
         }
 
+        const stopping = ref(false);
+
+        async function stopPlayback() {
+          stopping.value = true;
+          try {
+            const res = await fetch(`${API}/playback/stop`, { method: 'POST' });
+            const data = await res.json();
+            if (data.error) throw new Error(data.error);
+            playbackStatus.value = { playing: false };
+          } catch (e) {
+            songError.value = `Stop error: ${e.message}`;
+          } finally {
+            stopping.value = false;
+          }
+        }
+
         async function pollPlayback() {
           try {
             const res = await fetch(`${API}/playback/status`);
@@ -815,7 +846,7 @@
           songs, loadingSongs, songError, playStatus, playingId, deletingId, retaggingId,
           showUpload, uploadName, uploadFile, uploadImageUrl,
           uploading, uploadError,
-          playbackStatus, formatTime,
+          playbackStatus, formatTime, stopping, stopPlayback,
           scanning, scanResult, scanImports,
           activityLog,
           expandedId, toggleChapters,

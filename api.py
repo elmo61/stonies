@@ -569,4 +569,33 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, song
         except Exception as e:
             return jsonify({"playing": False, "error": str(e)})
 
+    @app.route("/api/playback/stop", methods=["POST"])
+    def playback_stop():
+        import pychromecast
+
+        with config_lock:
+            try:
+                with open(config_path, "r") as f:
+                    config = json.load(f)
+            except Exception:
+                config = {}
+
+        speaker_name = config.get("speaker", "").strip()
+        if not speaker_name:
+            return jsonify({"error": "No speaker configured"}), 400
+
+        try:
+            chromecasts, browser = pychromecast.get_listed_chromecasts(
+                friendly_names=[speaker_name]
+            )
+            if not chromecasts:
+                return jsonify({"error": f"Speaker '{speaker_name}' not found"}), 404
+            cast = chromecasts[0]
+            cast.wait(timeout=5)
+            cast.media_controller.stop()
+            state.add_log(f"Playback stopped on \"{speaker_name}\"")
+            return jsonify({"ok": True})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
     return app
