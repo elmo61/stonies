@@ -1,6 +1,6 @@
 # Stonies
 
-A Raspberry Pi app that lets you tap NFC stickers to cast music to Google/Chromecast speakers. Each sticker is linked to a song — tap it, and that song starts playing. A web UI handles adding songs, managing speakers, and writing new stickers.
+A Raspberry Pi app that lets kids tap NFC stickers to cast music and audiobooks to Google/Chromecast speakers. Each sticker is linked to a track or audiobook — tap it, and it starts playing. A web UI handles everything else: adding songs, managing speakers, writing stickers, and controlling playback.
 
 ---
 
@@ -8,16 +8,32 @@ A Raspberry Pi app that lets you tap NFC stickers to cast music to Google/Chrome
 
 Two things run in the same Python process:
 
-- **NFC daemon** (background thread) — owns the PN532 reader, loops forever listening for stickers. When a sticker is tapped it reads the ID, looks it up in `songs.json`, and tells the Chromecast to fetch and play the audio file served by this same app.
+- **NFC daemon** (background thread) — owns the PN532 reader, loops forever listening for stickers. When a sticker is tapped it reads the ID, looks it up in `songs.json`, and tells the Chromecast to fetch and play the audio served by this same app.
 - **Flask web server** (main thread) — serves the Vue UI and a REST API for managing songs, speakers, and NFC write operations.
 
-When you add a new song via the UI:
-1. The audio file is uploaded and saved to `music/`
+When you add a new track or audiobook via the UI:
+1. The audio file(s) are uploaded and saved to `music/`
 2. A 6-character hex ID is generated and saved to `songs.json`
 3. The daemon switches into **write mode** — tap a blank sticker and the ID gets written to it
-4. From then on, tapping that sticker casts the song
+4. From then on, tapping that sticker casts the song or queues all audiobook chapters in order
 
-**Offline mode** lets you tap stickers without casting — the matched song name shows in the UI instead. Useful for testing or when you just want to see what a sticker is linked to.
+---
+
+## Features
+
+- **Tracks** — single `.mp3` / `.m4a` files cast to any Google/Chromecast speaker
+- **Audiobooks** — multi-chapter folders queued as a playlist; resumes from where you left off
+- **NFC write** — upload a track and immediately write its ID to a sticker in one flow
+- **Re-tag** — write an existing song's ID to a new sticker at any time
+- **Now-playing bar** — sticky banner showing current track, chapter, and playback position; updates every 10 s while playing
+- **Stop playback** — stop the Chromecast from the UI
+- **Bedtime sleep timer** — automatically stops playback after a configurable duration if started after a set time (e.g. stop after 60 min if started after 7 pm)
+- **Offline mode** — tap stickers to identify them without casting anything
+- **Scan Imports** — drop files into `music_import/` on the Pi and import them in one click
+- **Inline rename** — rename any track or audiobook directly in the library
+- **Search** — filter the library by name or chapter title
+- **NFC activity log** — live terminal-style log of every tag read and cast event
+- **Rich Chromecast metadata** — title, album name, chapter number, and cover art sent to the speaker
 
 ---
 
@@ -43,70 +59,60 @@ When you add a new song via the UI:
 
 ---
 
-## Setup
-
-See [INSTALL.md](INSTALL.md) for the full step-by-step install guide.
-
-Quick version:
+## Quick start (fresh Raspberry Pi)
 
 ```bash
-# Enable I2C on the Pi
-sudo raspi-config  # Interface Options → I2C → Enable
-sudo reboot
-
-# Install system dependencies
-sudo apt update && sudo apt install python3-dev python3-venv i2c-tools
-
-# Verify NFC board is detected
-i2cdetect -y 1  # should show '24' or '48' in the grid
-
-# Set up the app
-git clone https://github.com/your-username/stonies.git
-cd stonies
-python3 -m venv env
-source env/bin/activate
-pip install flask flask-cors pychromecast RPi.GPIO adafruit-blinka adafruit-circuitpython-pn532
-
-# Run
-python main.py
+git clone https://github.com/elmo61/stonies.git && bash stonies/projects/stonies/setup.sh
 ```
 
+That's it. The script installs all dependencies, enables I2C, sets up a Python venv, and registers a systemd service so Stonies starts automatically on every boot.
+
 Open `http://<pi-ip>:5000` in a browser on any device on the same network.
+
+See [INSTALL.md](INSTALL.md) for manual steps and details.
 
 ---
 
 ## Usage
 
 ### First-time setup
-1. Open the UI and click **Refresh** under Speaker to scan the network
-2. Select your Google/Chromecast speaker from the dropdown and click **Save**
+1. Open the UI and click **⚙️ Settings**
+2. Select your Google/Chromecast speaker from the dropdown and click **Save Speaker**
+3. Optionally configure the bedtime sleep timer
 
-### Adding a song
-1. Click **+ Add Song**
+### Adding a track
+1. Click **+ Add Song** → select **🎵 Track**
 2. Enter a name, pick an audio file (`.mp3` or `.m4a`), optionally add a cover image URL
 3. Click **Upload & Write Tag** — the file uploads and the banner changes to *"Touch the sticker now..."*
 4. Tap a blank NFC sticker against the PN532 — it gets written and the song appears in the library
-5. From now on, tapping that sticker plays the song on your configured speaker
 
-### Re-tagging a song
-If you want to write a song's ID to a new sticker (e.g. the old one broke), click the **🏷 Tag** button next to that song in the library and tap a sticker.
+### Adding an audiobook
+1. Click **+ Add Song** → select **📚 Audiobook**
+2. Click **Select Folder** (or **Select Files**) — chapter names are auto-derived from filenames
+3. Edit chapter names if needed, then click **Upload & Write Tag**
+4. Tap a blank sticker — from now on tapping it queues all chapters on the speaker
+
+### Re-tagging
+Click **🏷 Tag** next to any song to write its ID to a new sticker.
 
 ### Offline mode
-Click the **Online** button at the top to switch to offline mode. In this mode, tapping stickers shows the matched song in the UI but does not cast anything. Click again to go back online.
+Click the **Online** button to switch to offline mode — stickers are identified but nothing is cast. Useful for testing without a speaker nearby.
 
 ---
 
 ## File structure
 
 ```
-main.py          Entry point — starts daemon thread and Flask
-nfc_daemon.py    NFCState class + NFC read/write helpers + background loop
-api.py           Flask REST API (factory pattern)
-index.html       Vue 3 + Bulma single-page frontend (no build step)
-INSTALL.md       Full install guide
-music/           Audio files (gitignored — add your own)
-songs.json       Song database (gitignored — generated at runtime)
-config.json      Saved speaker config (gitignored — generated at runtime)
+main.py           Entry point — starts daemon thread and Flask
+nfc_daemon.py     NFCState class + NFC read/write helpers + background loop
+api.py            Flask REST API (factory pattern)
+index.html        Vue 3 + Bulma single-page frontend (no build step)
+setup.sh          One-shot install script for a fresh Pi
+INSTALL.md        Manual install guide
+music/            Audio files (gitignored — add your own)
+music_import/     Drop files here and use Scan Imports to add them (gitignored)
+songs.json        Song database (gitignored — generated at runtime)
+config.json       Saved speaker + sleep timer config (gitignored)
 ```
 
 ---
@@ -116,18 +122,22 @@ config.json      Saved speaker config (gitignored — generated at runtime)
 | Method | Path | Description |
 |---|---|---|
 | GET | `/` | Serves the UI |
-| GET | `/music/<filename>` | Serves audio to Chromecast |
+| GET | `/music/<path>` | Serves audio files to Chromecast |
 | GET | `/api/speakers` | Discover Chromecast speakers on the network |
-| GET | `/api/config` | Get saved speaker config |
-| POST | `/api/config` | Save `{ speaker }` |
-| GET | `/api/songs` | List all songs |
-| POST | `/api/songs` | Upload a new song (multipart: `name`, `file`, `image_url`) |
-| DELETE | `/api/songs/<id>` | Delete a song and its audio file |
-| POST | `/api/songs/<id>/retag` | Write tag for an existing song |
-| GET | `/api/nfc/status` | NFC daemon state |
+| GET | `/api/config` | Get saved config (speaker, sleep timer) |
+| POST | `/api/config` | Save config |
+| GET | `/api/songs` | List all songs (auto-detects new audiobook folders) |
+| POST | `/api/songs` | Upload a track or audiobook (multipart) |
+| PATCH | `/api/songs/<id>` | Rename a song |
+| DELETE | `/api/songs/<id>` | Delete a song/audiobook and its files |
+| POST | `/api/songs/<id>/retag` | Write NFC tag for an existing song |
+| POST | `/api/play` | Cast a song by ID (optional `chapter_index`) |
+| GET | `/api/playback/status` | Current Chromecast playback state |
+| POST | `/api/playback/stop` | Stop Chromecast playback |
+| GET | `/api/nfc/status` | NFC daemon state + activity log |
 | POST | `/api/nfc/cancel` | Cancel a pending write |
 | POST | `/api/offline/toggle` | Toggle offline mode |
-| POST | `/api/play` | Manually cast a song by ID |
+| POST | `/api/import/scan` | Import files from `music_import/` |
 
 ---
 

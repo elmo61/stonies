@@ -1,25 +1,58 @@
 # Stonies — Install Guide
 
-Tested on Raspberry Pi OS Lite (armv7l, Python 3.13).
+Tested on Raspberry Pi OS Lite (armv7l, Python 3.11+).
 
-## 1. System dependencies
+---
 
-These must be installed before pip packages, as some require compiling C extensions.
+## Option A — Automatic (recommended)
+
+Run this single command on a fresh Pi:
+
+```bash
+git clone https://github.com/elmo61/stonies.git && bash stonies/projects/stonies/setup.sh
+```
+
+The script will:
+1. Install system packages (`python3-dev`, `python3-venv`)
+2. Enable I2C
+3. Create a Python virtual environment at `projects/stonies/env/`
+4. Install all pip packages
+5. Register and start a systemd service so Stonies auto-starts on every boot
+
+---
+
+## Option B — Manual
+
+### 1. Enable I2C
+
+```bash
+sudo raspi-config
+# Interface Options → I2C → Enable
+sudo reboot
+```
+
+### 2. System dependencies
 
 ```bash
 sudo apt update
 sudo apt install python3-dev python3-venv
 ```
 
-## 2. Create a virtual environment
+### 3. Clone the repo
 
 ```bash
-cd projects/stonies
+git clone https://github.com/elmo61/stonies.git
+cd stonies/projects/stonies
+```
+
+### 4. Create a virtual environment
+
+```bash
 python3 -m venv env
 source env/bin/activate
 ```
 
-## 3. Install Python packages
+### 5. Install Python packages
 
 ```bash
 pip install flask flask-cors pychromecast RPi.GPIO adafruit-blinka adafruit-circuitpython-pn532
@@ -34,42 +67,44 @@ pip install flask flask-cors pychromecast RPi.GPIO adafruit-blinka adafruit-circ
 | `adafruit-blinka` | CircuitPython hardware abstraction layer |
 | `adafruit-circuitpython-pn532` | PN532 NFC reader driver over I2C |
 
-## 4. Hardware wiring (PN532 via I2C)
-
-| PN532 pin | Pi pin |
-|---|---|
-| VCC | 3.3V (Pin 1) |
-| GND | GND (Pin 6) |
-| SDA | GPIO 2 / SDA (Pin 3) |
-| SCL | GPIO 3 / SCL (Pin 5) |
-
-Make sure I2C is enabled on the Pi:
-
-```bash
-sudo raspi-config
-# Interface Options → I2C → Enable
-```
-
-## 5. Run
+### 6. Run
 
 ```bash
 source env/bin/activate
 python main.py
 ```
 
-Access the UI at `http://<pi-ip>:5000`.
+Open `http://<pi-ip>:5000` in a browser on any device on the same network.
 
-## 6. Auto-start on boot (systemd)
+---
 
-To have the app start automatically whenever the Pi powers on, create a systemd service.
+## Hardware wiring (PN532 via I2C)
 
-**Create the service file:**
+| PN532 pin | Pi GPIO header |
+|---|---|
+| VCC | Pin 1 (3.3V) |
+| GND | Pin 6 |
+| SDA | Pin 3 (GPIO 2) |
+| SCL | Pin 5 (GPIO 3) |
+
+> If your PN532 module has DIP switches, set both to **OFF** for I2C mode.
+
+You can verify the board is detected with:
+
+```bash
+sudo apt install i2c-tools
+i2cdetect -y 1  # should show '24' or '48' in the grid
+```
+
+---
+
+## Auto-start on boot (systemd)
+
+The `setup.sh` script does this automatically. For a manual install:
 
 ```bash
 sudo nano /etc/systemd/system/stonies.service
 ```
-
-Paste the following (replace `pi` with your actual Pi username if different):
 
 ```ini
 [Unit]
@@ -78,8 +113,8 @@ After=network.target
 
 [Service]
 User=pi
-WorkingDirectory=/home/pi/projects/stonies
-ExecStart=/home/pi/projects/stonies/env/bin/python main.py
+WorkingDirectory=/home/pi/stonies/projects/stonies
+ExecStart=/home/pi/stonies/projects/stonies/env/bin/python main.py
 Restart=on-failure
 RestartSec=5
 
@@ -87,28 +122,26 @@ RestartSec=5
 WantedBy=multi-user.target
 ```
 
-> **Note:** `ExecStart` calls the venv's Python directly — do not use `source env/bin/activate`, as that doesn't work in non-interactive shells.
-
-**Enable and start the service:**
-
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable stonies    # register to start on every boot
-sudo systemctl start stonies     # start it now without rebooting
+sudo systemctl enable stonies
+sudo systemctl start stonies
 ```
 
 **Useful commands:**
 
 ```bash
-sudo systemctl status stonies    # check if it's running
+sudo systemctl status stonies    # check it's running
 sudo systemctl restart stonies   # apply changes after editing code
 sudo systemctl stop stonies      # stop it
-journalctl -u stonies -f         # tail live logs
+journalctl -u stonies -f         # live logs
 journalctl -u stonies -n 50      # last 50 log lines
 ```
 
+---
+
 ## Notes
 
-- The app will start even if the PN532 is not connected — the NFC daemon exits gracefully and Flask runs normally.
-- Audio files are stored in `music/` and served directly to Chromecast devices.
+- The app starts cleanly even without the PN532 connected — the NFC daemon exits gracefully and Flask runs normally. Useful for testing the UI without hardware.
 - `songs.json` and `config.json` are created automatically on first run.
+- Audio files live in `music/` and are served directly to Chromecast devices over HTTP — no internet needed.
