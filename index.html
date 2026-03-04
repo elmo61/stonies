@@ -309,7 +309,20 @@
         <p v-if="playStatus" class="help is-success mt-2">{{ playStatus }}</p>
       </div>
 
-      <p class="has-text-centered has-text-grey-light mt-4 mb-6">
+      <!-- Activity log -->
+      <div class="box mt-4 mb-2">
+        <h2 class="title is-6 mb-3">NFC Activity</h2>
+        <div
+          style="max-height: 180px; overflow-y: auto; font-family: monospace; font-size: 0.78rem; background: #1a1a2e; color: #d0d0e0; border-radius: 4px; padding: 0.6rem 0.8rem;"
+        >
+          <div v-if="activityLog.length === 0" class="has-text-grey" style="font-style: italic;">No activity yet...</div>
+          <div v-for="entry in [...activityLog].reverse()" :key="entry.seq" style="line-height: 1.6;">
+            <span style="color: #6272a4;">[{{ entry.time }}]</span> {{ entry.msg }}
+          </div>
+        </div>
+      </div>
+
+      <p class="has-text-centered has-text-grey-light mt-3 mb-6">
         <small>Stonies — running on {{ piHost }}</small>
       </p>
 
@@ -417,6 +430,7 @@
             const data = await res.json();
             const prev = nfcStatus.value;
             nfcStatus.value = data;
+            ingestLog(data.log);
             // Transition into success — start countdown and reload songs
             if (data.sub_state === 'success' && prev.sub_state !== 'success') {
               await loadSongs();
@@ -481,6 +495,19 @@
             songError.value = `Scan error: ${e.message}`;
           } finally {
             scanning.value = false;
+          }
+        }
+
+        // --- Activity log ---
+        const activityLog = ref([]);
+        let lastLogSeq = 0;
+
+        function ingestLog(entries) {
+          if (!entries) return;
+          const fresh = entries.filter(e => e.seq > lastLogSeq);
+          if (fresh.length) {
+            activityLog.value = [...activityLog.value, ...fresh];
+            lastLogSeq = fresh[fresh.length - 1].seq;
           }
         }
 
@@ -714,6 +741,7 @@
           showUpload, uploadName, uploadFile, uploadImageUrl,
           uploading, uploadError,
           scanning, scanResult, scanImports,
+          activityLog,
           expandedId, toggleChapters,
           uploadType, uploadChapters, setUploadType, onAudiobookFilesChange,
           onFileChange, uploadSong, playSong, deleteSong, retagSong,

@@ -1,6 +1,7 @@
 import json
 import time
 import threading
+from datetime import datetime
 
 
 class NFCState:
@@ -16,8 +17,21 @@ class NFCState:
         self._hw_error = None          # set if PN532 failed to init
         self._offline = False          # offline mode: read tags but don't cast
         self._last_seen_song = None    # last matched song in offline mode
+        self._log = []                 # activity log entries [{seq, time, msg}]
+        self._log_seq = 0
 
     # --- Public API for Flask ---
+
+    def add_log(self, msg):
+        with self._lock:
+            self._log_seq += 1
+            self._log.append({
+                "seq": self._log_seq,
+                "time": datetime.now().strftime("%H:%M:%S"),
+                "msg": msg,
+            })
+            if len(self._log) > 200:
+                self._log = self._log[-200:]
 
     def get_status(self):
         with self._lock:
@@ -28,6 +42,7 @@ class NFCState:
                 "hw_error": self._hw_error,
                 "offline": self._offline,
                 "last_seen_song": self._last_seen_song,
+                "log": list(self._log),
             }
 
     def toggle_offline(self):
@@ -259,6 +274,7 @@ def run_daemon(state, songs_path, songs_lock, config_path, config_lock, pi_ip):
         pn532 = PN532_I2C(i2c, debug=False)
         pn532.SAM_configuration()
         print("[NFC] PN532 online. Listening for tags...")
+        state.add_log("NFC reader online")
     except Exception as e:
         msg = f"PN532 not available: {e}"
         print(f"[NFC] {msg}")
@@ -271,6 +287,8 @@ def run_daemon(state, songs_path, songs_lock, config_path, config_lock, pi_ip):
         if mode == "listening":
             uid = pn532.read_passive_target(timeout=0.5)
             if uid is not None:
+                uid_str = uid.hex().upper()
+                state.add_log(f"Tag detected: {uid_str}")
                 try:
                     id_str = read_blocks(pn532)
                     print(f"[NFC] Tag read: '{id_str}'")
@@ -280,20 +298,28 @@ def run_daemon(state, songs_path, songs_lock, config_path, config_lock, pi_ip):
                             if state._get_offline():
                                 print(f"[NFC] Offline — tag matched: '{song['name']}'")
                                 state._set_last_seen(song)
+                                state.add_log(f"Offline — matched \"{song['name']}\" (not casting)")
                             else:
                                 print(f"[NFC] Casting '{song['name']}'...")
+                                state.add_log(f"Casting \"{song['name']}\"...")
                                 try:
                                     if song.get("type") == "audiobook":
                                         cast_audiobook(song, config_path, config_lock, pi_ip)
                                     else:
                                         cast_song(song, config_path, config_lock, pi_ip)
                                     print(f"[NFC] Now playing '{song['name']}'")
+                                    state.add_log(f"Now playing \"{song['name']}\"")
                                 except Exception as e:
                                     print(f"[NFC] Cast error: {e}")
+                                    state.add_log(f"Cast failed: {e}")
                         else:
                             print(f"[NFC] No song found for id '{id_str}'")
+                            state.add_log(f"No song found for ID \"{id_str}\"")
+                    else:
+                        state.add_log(f"Tag {uid_str}: no data")
                 except Exception as e:
                     print(f"[NFC] Read error: {e}")
+                    state.add_log(f"Read error: {e}")
                 time.sleep(3)  # debounce
 
         elif mode == "writing":
@@ -307,13 +333,16 @@ def run_daemon(state, songs_path, songs_lock, config_path, config_lock, pi_ip):
 
             if uid is not None:
                 state._set_sub_state("writing_tag")
+                state.add_log(f"Writing tag for song \"{song_id}\"...")
                 try:
                     write_blocks(pn532, song_id)
                     print(f"[NFC] Wrote song id '{song_id}' to tag")
+                    state.add_log(f"Tag written successfully for \"{song_id}\"")
                     state._set_sub_state("success")
                     time.sleep(5)
                 except Exception as e:
                     print(f"[NFC] Write error: {e}")
+                    state.add_log(f"Write failed: {e}")
                     state._set_sub_state("error", error_msg=str(e))
                     time.sleep(5)
                 finally:

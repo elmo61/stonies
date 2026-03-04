@@ -408,6 +408,7 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, song
         song = lookup_song(song_id, songs_path, songs_lock)
         if not song:
             return jsonify({"error": "Song not found"}), 404
+        state.add_log(f"Tag write requested for \"{song['name']}\"")
         state.request_write(song_id)
         return jsonify({"ok": True, "status": "pending"})
 
@@ -436,12 +437,15 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, song
             return jsonify({"error": "Song not found"}), 404
 
         try:
+            state.add_log(f"Web play: \"{song['name']}\"...")
             if song.get("type") == "audiobook":
                 cast_audiobook(song, config_path, config_lock, pi_ip)
             else:
                 cast_song(song, config_path, config_lock, pi_ip)
+            state.add_log(f"Now playing \"{song['name']}\"")
             return jsonify({"ok": True, "message": f"Now playing '{song['name']}'"})
         except Exception as e:
+            state.add_log(f"Play failed: {e}")
             return jsonify({"error": str(e)}), 500
 
     return app
