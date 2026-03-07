@@ -393,8 +393,14 @@ def run_daemon(state, songs_path, songs_lock, config_path, config_lock, pi_ip):
                 uid_str = uid.hex().upper()
                 state.add_log(f"Tag detected: {uid_str}")
                 try:
-                    id_str = read_blocks(pn532)
-                    print(f"[NFC] Tag read: '{id_str}'")
+                    raw = read_blocks(pn532)
+                    print(f"[NFC] Tag read: '{raw}'")
+                    PREFIX = "stonies:"
+                    if raw and not raw.startswith(PREFIX):
+                        state.add_log(f"Unrecognized tag (not a Stonies tag): \"{raw[:20]}\"")
+                        id_str = None
+                    else:
+                        id_str = raw[len(PREFIX):] if raw else None
                     if id_str:
                         song = lookup_song(id_str, songs_path, songs_lock)
                         if song:
@@ -444,7 +450,7 @@ def run_daemon(state, songs_path, songs_lock, config_path, config_lock, pi_ip):
                 state._set_sub_state("writing_tag")
                 state.add_log(f"Writing tag for song \"{song_id}\"...")
                 try:
-                    write_blocks(pn532, song_id)
+                    write_blocks(pn532, f"stonies:{song_id}")
                     print(f"[NFC] Wrote song id '{song_id}' to tag")
                     state.add_log(f"Tag written successfully for \"{song_id}\"")
                     state._set_sub_state("success")
