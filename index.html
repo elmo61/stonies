@@ -952,6 +952,7 @@
           if (uploadType.value === 'audiobook' && uploadChapters.value.length === 0) return;
 
           uploading.value = true;
+          if (bgPollTimer) { clearInterval(bgPollTimer); bgPollTimer = null; }
           nfcBannerDismissed.value = false;
           try {
             const form = new FormData();
@@ -984,6 +985,7 @@
             uploadError.value = e.message;
           } finally {
             uploading.value = false;
+            startBgPoll();
           }
         }
 
