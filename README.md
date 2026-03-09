@@ -62,7 +62,11 @@ When you add a new track or audiobook via the UI:
 ## Quick start (fresh Raspberry Pi)
 
 ```bash
-git clone https://github.com/elmo61/stonies.git && bash stonies/projects/stonies/setup.sh
+sudo apt update
+sudo apt install git -y
+git clone https://github.com/elmo61/stonies.git
+cd stonies/projects/stonies/
+bash setup.sh
 ```
 
 That's it. The script installs all dependencies, enables I2C, sets up a Python venv, and registers a systemd service so Stonies starts automatically on every boot.
