@@ -13,7 +13,7 @@ git clone https://github.com/elmo61/stonies.git && bash stonies/projects/stonies
 ```
 
 The script will:
-1. Install system packages (`python3-dev`, `python3-venv`)
+1. Install system packages (`python3-dev`, `python3-venv`, `i2c-tools`)
 2. Enable I2C
 3. Create a Python virtual environment at `projects/stonies/env/`
 4. Install all pip packages
@@ -35,7 +35,7 @@ sudo reboot
 
 ```bash
 sudo apt update
-sudo apt install python3-dev python3-venv
+sudo apt install python3-dev python3-venv i2c-tools
 ```
 
 ### 3. Clone the repo

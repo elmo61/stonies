@@ -18,7 +18,7 @@ echo ""
 # ── 1. System packages ──────────────────────────────────────────────────────
 echo ">>> [1/5] Installing system packages..."
 sudo apt-get update -qq
-sudo apt-get install -y python3-dev python3-venv
+sudo apt-get install -y python3-dev python3-venv i2c-tools
 
 # ── 2. Enable I2C ───────────────────────────────────────────────────────────
 echo ">>> [2/5] Enabling I2C..."
