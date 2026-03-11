@@ -77,7 +77,7 @@ def scan_audiobooks(music_folder, existing_songs):
     return new_entries
 
 
-def create_app(state, songs_lock, config_lock, music_folder, import_folder, songs_path, config_path, pi_ip):
+def create_app(state, songs_lock, config_lock, music_folder, import_folder, images_folder, songs_path, config_path, pi_ip):
     base_dir = os.path.dirname(os.path.abspath(__file__))
     app = Flask(__name__, static_folder=base_dir, static_url_path="")
     CORS(app)
@@ -105,6 +105,20 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, song
         ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
         mime = "audio/mp4" if ext == "m4a" else "audio/mpeg"
         return send_file(file_path, mimetype=mime, conditional=True)
+
+    # ------------------------------------------------------------------
+    # Image serving
+    # ------------------------------------------------------------------
+
+    @app.route("/images/<path:filename>")
+    def serve_image(filename):
+        file_path = os.path.realpath(os.path.join(images_folder, filename))
+        images_root = os.path.realpath(images_folder)
+        if not file_path.startswith(images_root + os.sep) and file_path != images_root:
+            return jsonify({"error": "Forbidden"}), 403
+        if not os.path.isfile(file_path):
+            return jsonify({"error": "Image not found"}), 404
+        return send_file(file_path, conditional=True)
 
     # ------------------------------------------------------------------
     # Speakers
@@ -178,13 +192,22 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, song
     @app.route("/api/songs", methods=["POST"])
     def add_song():
         name = request.form.get("name", "").strip()
-        image_url = request.form.get("image_url", "").strip()
         song_type = request.form.get("type", "track")
 
         if not name:
             return jsonify({"error": "name is required"}), 400
 
         song_id = secrets.token_hex(3)
+
+        # Handle cover image upload
+        image_url = ""
+        image_file = request.files.get("image")
+        if image_file and image_file.filename:
+            img_ext = image_file.filename.rsplit(".", 1)[-1].lower() if "." in image_file.filename else ""
+            if img_ext in ("jpg", "jpeg", "png", "gif", "webp"):
+                img_filename = f"{song_id}.{img_ext}"
+                image_file.save(os.path.join(images_folder, img_filename))
+                image_url = f"http://{pi_ip}:5000/images/{img_filename}"
 
         if song_type == "audiobook":
             files = request.files.getlist("files[]")
@@ -248,8 +271,12 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, song
             with open(songs_path, "w") as f:
                 json.dump(songs, f, indent=2)
 
-        state.request_write(song_id)
-        return jsonify({"id": song_id, "status": "pending"}), 202
+        # Only request NFC write if the hardware is available
+        if not state._hw_error:
+            state.request_write(song_id)
+            return jsonify({"id": song_id, "status": "pending"}), 202
+        else:
+            return jsonify({"id": song_id, "status": "saved"}), 200
 
     @app.route("/api/songs/<song_id>", methods=["PATCH"])
     def rename_song(song_id):
@@ -299,6 +326,13 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, song
                 file_path = os.path.join(music_folder, removed.get("filename", ""))
                 if os.path.isfile(file_path):
                     os.remove(file_path)
+            # Remove associated image file if it was locally hosted
+            img_url = removed.get("image_url", "")
+            if img_url and "/images/" in img_url:
+                img_filename = img_url.rsplit("/images/", 1)[-1]
+                img_path = os.path.join(images_folder, img_filename)
+                if os.path.isfile(img_path):
+                    os.remove(img_path)
             return jsonify({"ok": True})
         return jsonify({"error": "Song not found"}), 404
 
@@ -432,6 +466,8 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, song
 
     @app.route("/api/songs/<song_id>/retag", methods=["POST"])
     def retag_song(song_id):
+        if state._hw_error:
+            return jsonify({"error": "NFC reader not available"}), 400
         song = lookup_song(song_id, songs_path, songs_lock)
         if not song:
             return jsonify({"error": "Song not found"}), 404
@@ -466,6 +502,7 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, song
 
         try:
             state.add_log(f"Web play: \"{song['name']}\"...")
+            state.set_playing(True)
             if song.get("type") == "audiobook":
                 prog = song.get("progress", {})
                 if chapter_index is not None:
@@ -481,6 +518,7 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, song
             check_and_schedule_sleep(state, config_path, config_lock, pi_ip)
             return jsonify({"ok": True, "message": f"Now playing '{song['name']}'"})
         except Exception as e:
+            state.set_playing(False)
             state.add_log(f"Play failed: {e}")
             return jsonify({"error": str(e)}), 500
 
@@ -489,6 +527,11 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, song
         import pychromecast
         import time as _time
         from urllib.parse import unquote, urlparse
+
+        # Don't connect to the Chromecast unless Stonies itself started playback.
+        # This prevents the "bong" connection sound when idle.
+        if not state._stonies_playing:
+            return jsonify({"playing": False})
 
         with config_lock:
             try:
@@ -516,6 +559,7 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, song
             status = mc.status
 
             if not status or status.player_state not in ("PLAYING", "PAUSED", "BUFFERING"):
+                state.set_playing(False)
                 return jsonify({"playing": False})
 
             content_id = status.content_id or ""
@@ -625,6 +669,7 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, song
             mc.update_status()
             _time.sleep(1)
             mc.stop()
+            state.set_playing(False)
             state.cancel_sleep()
             state.add_log(f"Playback stopped on \"{speaker_name}\"")
             return jsonify({"ok": True})

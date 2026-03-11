@@ -21,6 +21,8 @@ class NFCState:
         self._log_seq = 0
         self._sleep_timer = None       # threading.Timer for bedtime stop
         self._sleep_stops_at = None    # ISO string when sleep will fire
+        self._write_started_at = None  # time.time() when write mode was entered
+        self._stonies_playing = False  # True only when Stonies itself initiated playback
 
     # --- Public API for Flask ---
 
@@ -66,8 +68,13 @@ class NFCState:
                 "offline": self._offline,
                 "last_seen_song": self._last_seen_song,
                 "sleep_stops_at": self._sleep_stops_at,
+                "stonies_playing": self._stonies_playing,
                 "log": list(self._log),
             }
+
+    def set_playing(self, val):
+        with self._lock:
+            self._stonies_playing = val
 
     def toggle_offline(self):
         with self._lock:
@@ -82,6 +89,7 @@ class NFCState:
             self._pending_song_id = song_id
             self._sub_state = "waiting_for_tag"
             self._error_msg = None
+            self._write_started_at = time.time()
         self._event.set()
 
     def cancel_write(self):
@@ -412,6 +420,7 @@ def run_daemon(state, songs_path, songs_lock, config_path, config_lock, pi_ip):
                                 print(f"[NFC] Casting '{song['name']}'...")
                                 state.add_log(f"Casting \"{song['name']}\"...")
                                 try:
+                                    state.set_playing(True)
                                     if song.get("type") == "audiobook":
                                         prog = song.get("progress", {})
                                         cast_audiobook(
@@ -441,6 +450,15 @@ def run_daemon(state, songs_path, songs_lock, config_path, config_lock, pi_ip):
             song_id = state._get_write_id()
             if song_id is None:
                 time.sleep(0.1)
+                continue
+
+            # Auto-cancel after 20 seconds if no tag presented (song stays saved)
+            with state._lock:
+                started = state._write_started_at
+            if started and (time.time() - started) > 20:
+                state.add_log("Write timed out — no tag presented. Song is saved.")
+                print("[NFC] Write mode timed out, reverting to listening")
+                state._revert_to_listening()
                 continue
 
             state._set_sub_state("waiting_for_tag")

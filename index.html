@@ -280,10 +280,11 @@
 
           <!-- Cover image -->
           <div class="field">
-            <label class="label">Cover Image URL <span class="has-text-grey-light">(optional)</span></label>
+            <label class="label">Cover Image <span class="has-text-grey-light">(optional)</span></label>
             <div class="control">
-              <input class="input" type="text" v-model="uploadImageUrl" placeholder="https://..." />
+              <input class="input" type="file" accept="image/*" @change="onImageChange" />
             </div>
+            <p v-if="uploadImageFile" class="help has-text-grey">{{ uploadImageFile.name }}</p>
           </div>
 
           <div class="field">
@@ -294,7 +295,7 @@
                 :disabled="uploading || !uploadName || (uploadType === 'track' ? !uploadFile : uploadChapters.length === 0)"
                 @click="uploadSong"
               >
-                Upload &amp; Write Tag
+                {{ nfcStatus.hw_error ? 'Upload' : 'Upload &amp; Write Tag' }}
               </button>
             </div>
           </div>
@@ -418,7 +419,7 @@
                     @click="startRename(song)" title="Rename">
                     ✏️
                   </button>
-                  <button class="button is-info is-small is-outlined"
+                  <button v-if="!nfcStatus.hw_error" class="button is-info is-small is-outlined"
                     :class="{'is-loading': retaggingId === song.id}"
                     :disabled="nfcStatus.mode === 'writing'"
                     @click="retagSong(song)" title="Write NFC tag">
@@ -878,7 +879,7 @@
         const uploadType = ref('track');
         const uploadName = ref('');
         const uploadFile = ref(null);
-        const uploadImageUrl = ref('');
+        const uploadImageFile = ref(null);
         const uploading = ref(false);
         const uploadError = ref('');
         const uploadChapters = ref([]); // [{file, name}]
@@ -887,8 +888,13 @@
           uploadType.value = t;
           uploadName.value = '';
           uploadFile.value = null;
+          uploadImageFile.value = null;
           uploadChapters.value = [];
           uploadError.value = '';
+        }
+
+        function onImageChange(event) {
+          uploadImageFile.value = event.target.files[0] || null;
         }
 
         function deriveChapterName(filename) {
@@ -958,7 +964,7 @@
             const form = new FormData();
             form.append('type', uploadType.value);
             form.append('name', uploadName.value);
-            form.append('image_url', uploadImageUrl.value);
+            if (uploadImageFile.value) form.append('image', uploadImageFile.value);
 
             if (uploadType.value === 'audiobook') {
               form.append('chapter_names', JSON.stringify(uploadChapters.value.map(ch => ch.name)));
@@ -976,11 +982,18 @@
             // Reset form
             uploadName.value = '';
             uploadFile.value = null;
-            uploadImageUrl.value = '';
+            uploadImageFile.value = null;
             uploadChapters.value = [];
             showUpload.value = false;
-            await pollNfcStatus();
-            startNfcPoll();
+
+            if (nfcStatus.value.hw_error) {
+              // NFC unavailable — song is saved, just reload the list
+              await loadSongs();
+            } else {
+              // NFC available — poll for write status
+              await pollNfcStatus();
+              startNfcPoll();
+            }
           } catch (e) {
             uploadError.value = e.message;
           } finally {
@@ -1113,8 +1126,8 @@
           nfcBannerDismissed, successCountdown, dismissNfcBanner, cancelWrite,
           // songs
           songs, loadingSongs, songError, playStatus, playingId, deletingId, retaggingId,
-          showUpload, uploadName, uploadFile, uploadImageUrl,
-          uploading, uploadError,
+          showUpload, uploadName, uploadFile, uploadImageFile,
+          uploading, uploadError, onImageChange,
           showSettings, openSettings,
           playbackStatus, formatTime, stopping, stopPlayback,
           sleepTimer, savingSleep, sleepSaveStatus, saveSleepTimer, formatSleepCountdown,
