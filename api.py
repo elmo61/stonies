@@ -300,6 +300,24 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
                 json.dump(songs, f, indent=2)
         return jsonify({"ok": True, "name": name})
 
+    @app.route("/api/songs/<song_id>/progress", methods=["DELETE"])
+    def clear_progress(song_id):
+        with songs_lock:
+            try:
+                with open(songs_path, "r") as f:
+                    songs = json.load(f)
+            except Exception:
+                songs = []
+            for s in songs:
+                if s.get("id") == song_id:
+                    s.pop("progress", None)
+                    break
+            else:
+                return jsonify({"error": "Song not found"}), 404
+            with open(songs_path, "w") as f:
+                json.dump(songs, f, indent=2)
+        return jsonify({"ok": True})
+
     @app.route("/api/songs/<song_id>", methods=["DELETE"])
     def delete_song(song_id):
         removed = None

@@ -378,7 +378,7 @@
                     {{ song.id }} · {{ formatDate(song.uploaded_at) }}
                     <template v-if="song.type === 'audiobook'">
                       · {{ song.chapters.length }} ch
-                      <span v-if="song.progress" class="has-text-info ml-1">· Ch {{ (song.progress.chapter_index||0)+1 }} · {{ formatTime(song.progress.current_time) }}</span>
+                      <span v-if="song.progress" class="has-text-info ml-1">· Ch {{ (song.progress.chapter_index||0)+1 }} · {{ formatTime(song.progress.current_time) }} <a @click.prevent="clearProgress(song)" href="#" style="color:#aaa;" title="Clear saved position">✕</a></span>
                       <a class="ml-1" @click.prevent="toggleChapters(song.id)" href="#" style="color:#aaa;">[{{ expandedId === song.id ? 'hide' : 'show' }}]</a>
                     </template>
                     <template v-else>· {{ song.filename }}</template>
@@ -1106,6 +1106,19 @@
           }
         }
 
+        async function clearProgress(song) {
+          if (!confirm(`Clear saved position for "${song.name}"?`)) return;
+          try {
+            const res = await fetch(`${API}/songs/${song.id}/progress`, { method: 'DELETE' });
+            const data = await res.json();
+            if (data.error) throw new Error(data.error);
+            const s = songs.value.find(s => s.id === song.id);
+            if (s) delete s.progress;
+          } catch (e) {
+            songError.value = `Clear progress error: ${e.message}`;
+          }
+        }
+
         // Low-frequency background poll to keep offline last-seen and mode badge fresh
         let bgPollTimer = null;
         function startBgPoll() {
@@ -1149,7 +1162,7 @@
           searchQuery, filteredSongs,
           editingId, editingName, renameError, startRename, saveRename, cancelRename,
           uploadType, uploadChapters, setUploadType, onAudiobookFilesChange,
-          onFileChange, uploadSong, playSong, playChapter, deleteSong, retagSong,
+          onFileChange, uploadSong, playSong, playChapter, deleteSong, clearProgress, retagSong,
           toggleOffline, formatDate,
         };
       }
