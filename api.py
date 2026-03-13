@@ -355,6 +355,39 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
         return jsonify({"error": "Song not found"}), 404
 
     # ------------------------------------------------------------------
+    # Update / deploy
+    # ------------------------------------------------------------------
+
+    @app.route("/api/update/status", methods=["GET"])
+    def update_status():
+        import subprocess
+        try:
+            subprocess.run(["git", "fetch"], cwd=base_dir, capture_output=True, timeout=10)
+            result = subprocess.run(
+                ["git", "rev-list", "HEAD..origin/main", "--count"],
+                cwd=base_dir, capture_output=True, text=True, timeout=5
+            )
+            behind = int(result.stdout.strip() or "0")
+            return jsonify({"updates_available": behind > 0, "commits_behind": behind})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    @app.route("/api/update", methods=["POST"])
+    def do_update():
+        import subprocess
+        try:
+            pull = subprocess.run(
+                ["git", "pull"],
+                cwd=base_dir, capture_output=True, text=True, timeout=30
+            )
+            if pull.returncode != 0:
+                return jsonify({"error": pull.stderr.strip()}), 500
+            subprocess.Popen(["sudo", "systemctl", "restart", "stonies"])
+            return jsonify({"ok": True, "output": pull.stdout.strip()})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    # ------------------------------------------------------------------
     # Import scan
     # ------------------------------------------------------------------
 
