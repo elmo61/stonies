@@ -87,6 +87,18 @@
     .spin { animation: spin 1s linear infinite; display: inline-block; }
     @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
     .upload-form { border-top: 1px solid #e8e8e8; margin-top: 1rem; padding-top: 1.25rem; }
+
+    /* ── Song actions column ───────────────────────────────── */
+    .song-actions { width: 160px; text-align: right; white-space: nowrap; }
+    .song-actions .buttons { flex-wrap: nowrap; gap: 3px; }
+
+    /* ── Mobile ────────────────────────────────────────────── */
+    @media (max-width: 640px) {
+      .song-actions { width: auto; white-space: normal; padding-left: 0; }
+      .song-actions .buttons { flex-wrap: wrap; }
+      .now-playing-bar { flex-direction: column; align-items: flex-start; gap: 0.5rem; }
+      .now-playing-bar button { align-self: flex-end; }
+    }
   </style>
 </head>
 <body>
@@ -405,8 +417,8 @@
               </td>
 
               <!-- Actions -->
-              <td style="width: 160px; text-align: right; white-space: nowrap;">
-                <div class="buttons is-right" style="flex-wrap:nowrap; gap:3px;">
+              <td class="song-actions">
+                <div class="buttons is-right">
                   <button class="button is-primary is-small"
                     :class="{'is-loading': playingId === song.id}"
                     :disabled="!savedSpeaker || playingId !== null || nfcStatus.offline"
