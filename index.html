@@ -209,14 +209,13 @@
             <span v-else class="has-text-grey-light">🌙 Sleep timer off</span>
           </div>
           <div class="level-right" style="gap: 0.5rem;">
-            <button v-if="updateAvailable" class="button is-warning is-small" :class="{'is-loading': updating}" @click="applyUpdate" :title="`${updateCommits} commit${updateCommits !== 1 ? 's' : ''} behind origin/main`">
+            <span v-if="updateAvailable" class="tag is-warning" :title="`${updateCommits} commit${updateCommits !== 1 ? 's' : ''} behind origin/main`">
               ⬆️ Update available
-            </button>
+            </span>
             <button class="button is-light is-small" @click="openSettings" title="Settings">
               ⚙️ Settings
             </button>
           </div>
-          <p v-if="updateError" class="help is-danger mt-1">{{ updateError }}</p>
         </div>
       </div>
 
@@ -800,8 +799,6 @@
 
         const updateAvailable = ref(false);
         const updateCommits = ref(0);
-        const updating = ref(false);
-        const updateError = ref('');
 
         async function checkForUpdates() {
           try {
@@ -812,21 +809,6 @@
               updateCommits.value = data.commits_behind;
             }
           } catch (_) {}
-        }
-
-        async function applyUpdate() {
-          if (!confirm('Pull latest code and restart the service?')) return;
-          updating.value = true;
-          updateError.value = '';
-          try {
-            const res = await fetch(`${API}/update`, { method: 'POST' });
-            const data = await res.json();
-            if (data.error) throw new Error(data.error);
-            // Service is restarting — page will become unavailable briefly
-          } catch (e) {
-            updateError.value = e.message;
-            updating.value = false;
-          }
         }
 
         async function scanImports() {
@@ -1193,7 +1175,7 @@
           playbackStatus, formatTime, stopping, stopPlayback,
           sleepTimer, savingSleep, sleepSaveStatus, saveSleepTimer, formatSleepCountdown,
           scanning, scanResult, scanImports,
-          updateAvailable, updateCommits, updating, updateError, applyUpdate,
+          updateAvailable, updateCommits,
           activityLog,
           expandedId, toggleChapters,
           searchQuery, filteredSongs,

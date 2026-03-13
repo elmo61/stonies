@@ -372,21 +372,6 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 
-    @app.route("/api/update", methods=["POST"])
-    def do_update():
-        import subprocess
-        try:
-            pull = subprocess.run(
-                ["git", "pull"],
-                cwd=base_dir, capture_output=True, text=True, timeout=30
-            )
-            if pull.returncode != 0:
-                return jsonify({"error": pull.stderr.strip()}), 500
-            subprocess.Popen(["sudo", "systemctl", "restart", "stonies"])
-            return jsonify({"ok": True, "output": pull.stdout.strip()})
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
-
     # ------------------------------------------------------------------
     # Import scan
     # ------------------------------------------------------------------
