@@ -584,13 +584,14 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
             chromecasts, browser = pychromecast.get_listed_chromecasts(
                 friendly_names=[speaker_name]
             )
-            pychromecast.discovery.stop_discovery(browser)
             if not chromecasts:
+                pychromecast.discovery.stop_discovery(browser)
                 return jsonify({"playing": False})
 
             cast = chromecasts[0]
             try:
                 cast.wait(timeout=5)
+                pychromecast.discovery.stop_discovery(browser)
                 mc = cast.media_controller
                 mc.update_status()
                 _time.sleep(1)
@@ -701,12 +702,13 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
             chromecasts, browser = pychromecast.get_listed_chromecasts(
                 friendly_names=[speaker_name]
             )
-            pychromecast.discovery.stop_discovery(browser)
             if not chromecasts:
+                pychromecast.discovery.stop_discovery(browser)
                 return jsonify({"error": f"Speaker '{speaker_name}' not found"}), 404
             cast = chromecasts[0]
             try:
                 cast.wait(timeout=5)
+                pychromecast.discovery.stop_discovery(browser)
                 mc = cast.media_controller
                 mc.update_status()
                 _time.sleep(1)

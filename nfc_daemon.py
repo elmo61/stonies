@@ -248,13 +248,14 @@ def cast_audiobook(song, config_path, config_lock, pi_ip, start_index=0, start_t
     chromecasts, browser = pychromecast.get_listed_chromecasts(
         friendly_names=[speaker_name]
     )
-    pychromecast.discovery.stop_discovery(browser)
     if not chromecasts:
+        pychromecast.discovery.stop_discovery(browser)
         raise RuntimeError(f"Speaker '{speaker_name}' not found")
 
     cast = chromecasts[0]
     try:
         cast.wait()
+        pychromecast.discovery.stop_discovery(browser)
         cast.media_controller.send_message(
             {
                 "type": "QUEUE_LOAD",
@@ -293,13 +294,14 @@ def cast_song(song, config_path, config_lock, pi_ip):
     chromecasts, browser = pychromecast.get_listed_chromecasts(
         friendly_names=[speaker_name]
     )
-    pychromecast.discovery.stop_discovery(browser)
     if not chromecasts:
+        pychromecast.discovery.stop_discovery(browser)
         raise RuntimeError(f"Speaker '{speaker_name}' not found")
 
     cast = chromecasts[0]
     try:
         cast.wait()
+        pychromecast.discovery.stop_discovery(browser)
         cast.media_controller.play_media(
             url, mime,
             title=song.get("name", ""),
@@ -346,12 +348,13 @@ def make_stop_fn(config_path, config_lock, pi_ip, state):
             chromecasts, browser = pychromecast.get_listed_chromecasts(
                 friendly_names=[speaker_name]
             )
-            pychromecast.discovery.stop_discovery(browser)
             if not chromecasts:
+                pychromecast.discovery.stop_discovery(browser)
                 return
             cast = chromecasts[0]
             try:
                 cast.wait(timeout=5)
+                pychromecast.discovery.stop_discovery(browser)
                 mc = cast.media_controller
                 mc.update_status()
                 _time.sleep(1)
