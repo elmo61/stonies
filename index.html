@@ -86,10 +86,10 @@
       font-family: 'Courier New', monospace; font-size: 0.75rem;
       padding: 0.4rem 1rem;
       border-top: 1px solid #2a2840;
-      max-height: 5rem; overflow: hidden;
+      max-height: 8rem; overflow-y: auto;
     }
     .activity-bar-entry { line-height: 1.6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    body { padding-bottom: 5.5rem; }
+    body { padding-bottom: 9rem; }
 
     /* ── Misc ─────────────────────────────────────────────── */
     .spin { animation: spin 1s linear infinite; display: inline-block; }
@@ -551,7 +551,7 @@
   <div class="activity-bar">
     <div v-if="activityLog.length === 0" style="color: #555; font-style: italic;">No activity yet...</div>
     <div
-      v-for="entry in [...activityLog].slice(-3).reverse()"
+      v-for="entry in [...activityLog].slice(-5).reverse()"
       :key="entry.seq"
       class="activity-bar-entry"
     >
@@ -559,6 +559,7 @@
     </div>
   </div>
 
+</div>
 </div>
 
   <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
