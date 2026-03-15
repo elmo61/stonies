@@ -547,6 +547,13 @@
 
   <!-- Fixed activity log bar -->
   <div class="activity-bar">
+    <div style="color: #4a4060; font-size: 0.7rem; margin-bottom: 0.2rem;">
+      NFC reader:
+      <span v-if="nfcStatus.hw_error" style="color: #e05;">offline</span>
+      <span v-else-if="nfcStatus.nfc_heartbeat_age === null" style="color: #888;">starting...</span>
+      <span v-else-if="nfcStatus.nfc_heartbeat_age > 10" style="color: #e05;">⚠ stuck ({{ nfcStatus.nfc_heartbeat_age }}s ago)</span>
+      <span v-else style="color: #4a9;">● active ({{ nfcStatus.nfc_heartbeat_age }}s ago)</span>
+    </div>
     <div v-if="activityLog.length === 0" style="color: #555; font-style: italic;">No activity yet...</div>
     <div
       v-for="entry in [...activityLog].slice(-5).reverse()"

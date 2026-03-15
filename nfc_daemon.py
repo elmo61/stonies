@@ -25,6 +25,7 @@ class NFCState:
         self._stonies_playing = False  # True only when Stonies itself initiated playback
         self._current_song_id = None   # song id currently being cast
         self._current_chapter_index = None
+        self._nfc_heartbeat = None     # time.time() of last daemon loop iteration
 
     # --- Public API for Flask ---
 
@@ -62,6 +63,7 @@ class NFCState:
 
     def get_status(self):
         with self._lock:
+            heartbeat_age = round(time.time() - self._nfc_heartbeat, 1) if self._nfc_heartbeat else None
             return {
                 "mode": self._mode,
                 "sub_state": self._sub_state,
@@ -73,6 +75,7 @@ class NFCState:
                 "stonies_playing": self._stonies_playing,
                 "current_song_id": self._current_song_id,
                 "current_chapter_index": self._current_chapter_index,
+                "nfc_heartbeat_age": heartbeat_age,
                 "log": list(self._log),
             }
 
@@ -518,7 +521,7 @@ def run_daemon(state, songs_path, songs_lock, config_path, config_lock, pi_ip):
         import busio
         from adafruit_pn532.i2c import PN532_I2C
 
-        i2c = busio.I2C(board.SCL, board.SDA)
+        i2c = busio.I2C(board.SCL, board.SDA, frequency=100000)
         pn532 = PN532_I2C(i2c, debug=False)
         pn532.SAM_configuration()
         print("[NFC] PN532 online. Listening for tags...")
@@ -531,6 +534,8 @@ def run_daemon(state, songs_path, songs_lock, config_path, config_lock, pi_ip):
 
     while True:
       try:
+        with state._lock:
+            state._nfc_heartbeat = time.time()
         mode = state._get_mode()
 
         if mode == "listening":

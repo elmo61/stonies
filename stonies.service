@@ -1,0 +1,13 @@
+[Unit]
+Description=Stonies NFC music player
+After=network.target
+
+[Service]
+User=pi
+WorkingDirectory=/home/pi/stonies
+ExecStart=/home/pi/stonies/env/bin/python main.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
