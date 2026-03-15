@@ -584,15 +584,19 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
             chromecasts, browser = pychromecast.get_listed_chromecasts(
                 friendly_names=[speaker_name]
             )
+            pychromecast.discovery.stop_discovery(browser)
             if not chromecasts:
                 return jsonify({"playing": False})
 
             cast = chromecasts[0]
-            cast.wait(timeout=5)
-            mc = cast.media_controller
-            mc.update_status()
-            _time.sleep(1)
-            status = mc.status
+            try:
+                cast.wait(timeout=5)
+                mc = cast.media_controller
+                mc.update_status()
+                _time.sleep(1)
+                status = mc.status
+            finally:
+                cast.disconnect()
 
             if not status or status.player_state not in ("PLAYING", "PAUSED", "BUFFERING"):
                 state.set_playing(False)
@@ -697,14 +701,18 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
             chromecasts, browser = pychromecast.get_listed_chromecasts(
                 friendly_names=[speaker_name]
             )
+            pychromecast.discovery.stop_discovery(browser)
             if not chromecasts:
                 return jsonify({"error": f"Speaker '{speaker_name}' not found"}), 404
             cast = chromecasts[0]
-            cast.wait(timeout=5)
-            mc = cast.media_controller
-            mc.update_status()
-            _time.sleep(1)
-            mc.stop()
+            try:
+                cast.wait(timeout=5)
+                mc = cast.media_controller
+                mc.update_status()
+                _time.sleep(1)
+                mc.stop()
+            finally:
+                cast.disconnect()
             state.set_playing(False)
             state.cancel_sleep()
             state.add_log(f"Playback stopped on \"{speaker_name}\"")

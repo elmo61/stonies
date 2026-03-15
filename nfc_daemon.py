@@ -248,22 +248,26 @@ def cast_audiobook(song, config_path, config_lock, pi_ip, start_index=0, start_t
     chromecasts, browser = pychromecast.get_listed_chromecasts(
         friendly_names=[speaker_name]
     )
+    pychromecast.discovery.stop_discovery(browser)
     if not chromecasts:
         raise RuntimeError(f"Speaker '{speaker_name}' not found")
 
     cast = chromecasts[0]
-    cast.wait()
-    cast.media_controller.send_message(
-        {
-            "type": "QUEUE_LOAD",
-            "repeatMode": "REPEAT_OFF",
-            "startIndex": start_index,
-            "currentTime": start_time,
-            "items": queue_items,
-        },
-        inc_session_id=True,
-    )
-    cast.media_controller.block_until_active()
+    try:
+        cast.wait()
+        cast.media_controller.send_message(
+            {
+                "type": "QUEUE_LOAD",
+                "repeatMode": "REPEAT_OFF",
+                "startIndex": start_index,
+                "currentTime": start_time,
+                "items": queue_items,
+            },
+            inc_session_id=True,
+        )
+        cast.media_controller.block_until_active()
+    finally:
+        cast.disconnect()
 
 
 def cast_song(song, config_path, config_lock, pi_ip):
@@ -289,17 +293,21 @@ def cast_song(song, config_path, config_lock, pi_ip):
     chromecasts, browser = pychromecast.get_listed_chromecasts(
         friendly_names=[speaker_name]
     )
+    pychromecast.discovery.stop_discovery(browser)
     if not chromecasts:
         raise RuntimeError(f"Speaker '{speaker_name}' not found")
 
     cast = chromecasts[0]
-    cast.wait()
-    cast.media_controller.play_media(
-        url, mime,
-        title=song.get("name", ""),
-        thumb=song.get("image_url") or None,
-    )
-    cast.media_controller.block_until_active()
+    try:
+        cast.wait()
+        cast.media_controller.play_media(
+            url, mime,
+            title=song.get("name", ""),
+            thumb=song.get("image_url") or None,
+        )
+        cast.media_controller.block_until_active()
+    finally:
+        cast.disconnect()
 
 
 # ---------------------------------------------------------------------------
@@ -338,15 +346,19 @@ def make_stop_fn(config_path, config_lock, pi_ip, state):
             chromecasts, browser = pychromecast.get_listed_chromecasts(
                 friendly_names=[speaker_name]
             )
+            pychromecast.discovery.stop_discovery(browser)
             if not chromecasts:
                 return
             cast = chromecasts[0]
-            cast.wait(timeout=5)
-            mc = cast.media_controller
-            mc.update_status()
-            _time.sleep(1)
-            mc.stop()
-            state.add_log("Sleep timer fired — playback stopped")
+            try:
+                cast.wait(timeout=5)
+                mc = cast.media_controller
+                mc.update_status()
+                _time.sleep(1)
+                mc.stop()
+                state.add_log("Sleep timer fired — playback stopped")
+            finally:
+                cast.disconnect()
         except Exception as e:
             state.add_log(f"Sleep timer stop failed: {e}")
         finally:
