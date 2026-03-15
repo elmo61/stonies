@@ -418,12 +418,14 @@ def run_position_tracker(state, songs_path, songs_lock, config_path, config_lock
         if not playing or not song_id:
             continue
 
+        state.add_log("Position tracker: checking...")
         try:
             with config_lock:
                 with open(config_path, "r") as f:
                     config = json.load(f)
             speaker_name = config.get("speaker", "").strip()
             if not speaker_name:
+                state.add_log("Position tracker: no speaker configured")
                 continue
 
             chromecasts, browser = pychromecast.get_listed_chromecasts(
@@ -431,25 +433,31 @@ def run_position_tracker(state, songs_path, songs_lock, config_path, config_lock
             )
             if not chromecasts:
                 pychromecast.discovery.stop_discovery(browser)
+                state.add_log("Position tracker: speaker not found")
                 continue
 
             cast = chromecasts[0]
+            player_state = None
+            content_id = ""
+            current_time = 0
             try:
                 cast.wait(timeout=10)
                 pychromecast.discovery.stop_discovery(browser)
                 mc = cast.media_controller
                 mc.update_status()
                 _time.sleep(1)
-                status = mc.status
+                # Capture all values before disconnect clears the status object
+                if mc.status:
+                    player_state = mc.status.player_state
+                    content_id = mc.status.content_id or ""
+                    current_time = round(mc.status.current_time or 0, 1)
             finally:
                 cast.disconnect()
 
-            if not status or status.player_state not in ("PLAYING", "PAUSED", "BUFFERING"):
+            if player_state not in ("PLAYING", "PAUSED", "BUFFERING"):
+                state.add_log(f"Position tracker: not playing ({player_state})")
                 state.set_playing(False)
                 continue
-
-            content_id = status.content_id or ""
-            current_time = round(status.current_time or 0, 1)
 
             # Identify chapter from content URL for audiobooks
             chapter_idx = None
