@@ -408,6 +408,7 @@ def run_daemon(state, songs_path, songs_lock, config_path, config_lock, pi_ip):
         return  # Flask still runs; daemon exits cleanly
 
     while True:
+      try:
         mode = state._get_mode()
 
         if mode == "listening":
@@ -501,3 +502,8 @@ def run_daemon(state, songs_path, songs_lock, config_path, config_lock, pi_ip):
                     state._revert_to_listening()
         else:
             time.sleep(0.1)
+
+      except Exception as e:
+        print(f"[NFC] Daemon loop error (will retry): {e}")
+        state.add_log(f"NFC error (retrying): {e}")
+        time.sleep(1)
