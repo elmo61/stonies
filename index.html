@@ -1046,7 +1046,7 @@
             const data = await res.json();
             if (data.error) throw new Error(data.error);
             playStatus.value = data.message;
-            // setTimeout(pollPlayback, 3000); // disabled: polling creates Chromecast threads
+            setTimeout(pollPlayback, 3000);
           } catch (e) {
             songError.value = `Play error: ${e.message}`;
           } finally {
@@ -1068,7 +1068,7 @@
             const data = await res.json();
             if (data.error) throw new Error(data.error);
             playStatus.value = data.message;
-            // setTimeout(pollPlayback, 3000); // disabled: polling creates Chromecast threads
+            setTimeout(pollPlayback, 3000);
           } catch (e) {
             songError.value = `Play error: ${e.message}`;
           } finally {
@@ -1149,7 +1149,7 @@
           await Promise.all([loadConfig(), loadSpeakers(), loadSongs()]);
           await pollNfcStatus();
           startBgPoll();
-          // startPlaybackPoll(); // disabled: polling creates Chromecast threads
+          startPlaybackPoll();
           checkForUpdates();
         });
 

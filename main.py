@@ -2,7 +2,7 @@ import os
 import socket
 import threading
 
-from nfc_daemon import NFCState, run_daemon
+from nfc_daemon import NFCState, run_daemon, run_position_tracker
 from api import create_app
 
 
@@ -43,6 +43,13 @@ if __name__ == "__main__":
         daemon=True,
     )
     daemon_thread.start()
+
+    tracker_thread = threading.Thread(
+        target=run_position_tracker,
+        args=(state, songs_path, songs_lock, config_path, config_lock),
+        daemon=True,
+    )
+    tracker_thread.start()
 
     app = create_app(state, songs_lock, config_lock, music_folder, import_folder, images_folder, songs_path, config_path, pi_ip)
     print(f"[Main] Starting Flask on http://{pi_ip}:5000")

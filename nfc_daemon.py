@@ -23,6 +23,8 @@ class NFCState:
         self._sleep_stops_at = None    # ISO string when sleep will fire
         self._write_started_at = None  # time.time() when write mode was entered
         self._stonies_playing = False  # True only when Stonies itself initiated playback
+        self._current_song_id = None   # song id currently being cast
+        self._current_chapter_index = None
 
     # --- Public API for Flask ---
 
@@ -69,12 +71,23 @@ class NFCState:
                 "last_seen_song": self._last_seen_song,
                 "sleep_stops_at": self._sleep_stops_at,
                 "stonies_playing": self._stonies_playing,
+                "current_song_id": self._current_song_id,
+                "current_chapter_index": self._current_chapter_index,
                 "log": list(self._log),
             }
 
     def set_playing(self, val):
         with self._lock:
             self._stonies_playing = val
+            if not val:
+                self._current_song_id = None
+                self._current_chapter_index = None
+
+    def set_now_playing(self, song_id, chapter_index=None):
+        with self._lock:
+            self._stonies_playing = True
+            self._current_song_id = song_id
+            self._current_chapter_index = chapter_index
 
     def toggle_offline(self):
         with self._lock:
@@ -386,6 +399,107 @@ def check_and_schedule_sleep(state, config_path, config_lock, pi_ip):
 
 
 # ---------------------------------------------------------------------------
+# Position tracker (runs every 2 minutes, saves progress to songs.json)
+# ---------------------------------------------------------------------------
+
+def run_position_tracker(state, songs_path, songs_lock, config_path, config_lock):
+    """Background thread: polls Chromecast every 2 minutes and saves audiobook progress."""
+    import pychromecast
+    from urllib.parse import unquote, urlparse
+    import time as _time
+
+    while True:
+        _time.sleep(120)
+
+        with state._lock:
+            playing = state._stonies_playing
+            song_id = state._current_song_id
+
+        if not playing or not song_id:
+            continue
+
+        try:
+            with config_lock:
+                with open(config_path, "r") as f:
+                    config = json.load(f)
+            speaker_name = config.get("speaker", "").strip()
+            if not speaker_name:
+                continue
+
+            chromecasts, browser = pychromecast.get_listed_chromecasts(
+                friendly_names=[speaker_name]
+            )
+            if not chromecasts:
+                pychromecast.discovery.stop_discovery(browser)
+                continue
+
+            cast = chromecasts[0]
+            try:
+                cast.wait(timeout=10)
+                pychromecast.discovery.stop_discovery(browser)
+                mc = cast.media_controller
+                mc.update_status()
+                _time.sleep(1)
+                status = mc.status
+            finally:
+                cast.disconnect()
+
+            if not status or status.player_state not in ("PLAYING", "PAUSED", "BUFFERING"):
+                state.set_playing(False)
+                continue
+
+            content_id = status.content_id or ""
+            current_time = round(status.current_time or 0, 1)
+
+            # Identify chapter from content URL for audiobooks
+            chapter_idx = None
+            try:
+                parts = urlparse(content_id).path.split("/music/", 1)
+                if len(parts) == 2:
+                    path_parts = unquote(parts[1]).split("/", 1)
+                    if len(path_parts) == 2:
+                        folder, ch_file = path_parts
+                        with songs_lock:
+                            with open(songs_path, "r") as f:
+                                songs = json.load(f)
+                        for s in songs:
+                            if s.get("id") == song_id and s.get("type") == "audiobook":
+                                for i, ch in enumerate(s.get("chapters", [])):
+                                    if ch.get("filename") == ch_file:
+                                        chapter_idx = i
+                                        break
+                                break
+            except Exception:
+                pass
+
+            # Save progress for audiobooks only
+            with songs_lock:
+                try:
+                    with open(songs_path, "r") as f:
+                        songs = json.load(f)
+                except Exception:
+                    continue
+                for s in songs:
+                    if s.get("id") == song_id and s.get("type") == "audiobook":
+                        progress = {
+                            "current_time": current_time,
+                            "updated_at": datetime.now().isoformat(timespec="seconds"),
+                        }
+                        if chapter_idx is not None:
+                            progress["chapter_index"] = chapter_idx
+                            with state._lock:
+                                state._current_chapter_index = chapter_idx
+                        s["progress"] = progress
+                        with open(songs_path, "w") as f:
+                            json.dump(songs, f, indent=2)
+                        state.add_log(f"Progress saved: ch{(chapter_idx or 0) + 1} @ {int(current_time)}s")
+                        break
+
+        except Exception as e:
+            state.add_log(f"Position tracker error: {e}")
+
+
+# ---------------------------------------------------------------------------
 # Daemon loop
 # ---------------------------------------------------------------------------
 
@@ -440,13 +554,16 @@ def run_daemon(state, songs_path, songs_lock, config_path, config_lock, pi_ip):
                                     try:
                                         if s.get("type") == "audiobook":
                                             prog = s.get("progress", {})
+                                            start_index = prog.get("chapter_index", 0)
                                             cast_audiobook(
                                                 s, config_path, config_lock, pi_ip,
-                                                start_index=prog.get("chapter_index", 0),
+                                                start_index=start_index,
                                                 start_time=prog.get("current_time", 0),
                                             )
+                                            state.set_now_playing(s["id"], chapter_index=start_index)
                                         else:
                                             cast_song(s, config_path, config_lock, pi_ip)
+                                            state.set_now_playing(s["id"])
                                         print(f"[NFC] Now playing '{s['name']}'")
                                         state.add_log(f"Now playing \"{s['name']}\"")
                                         check_and_schedule_sleep(state, config_path, config_lock, pi_ip)
