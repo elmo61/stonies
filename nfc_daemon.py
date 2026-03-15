@@ -431,23 +431,27 @@ def run_daemon(state, songs_path, songs_lock, config_path, config_lock, pi_ip):
                             else:
                                 print(f"[NFC] Casting '{song['name']}'...")
                                 state.add_log(f"Casting \"{song['name']}\"...")
-                                try:
-                                    state.set_playing(True)
-                                    if song.get("type") == "audiobook":
-                                        prog = song.get("progress", {})
-                                        cast_audiobook(
-                                            song, config_path, config_lock, pi_ip,
-                                            start_index=prog.get("chapter_index", 0),
-                                            start_time=prog.get("current_time", 0),
-                                        )
-                                    else:
-                                        cast_song(song, config_path, config_lock, pi_ip)
-                                    print(f"[NFC] Now playing '{song['name']}'")
-                                    state.add_log(f"Now playing \"{song['name']}\"")
-                                    check_and_schedule_sleep(state, config_path, config_lock, pi_ip)
-                                except Exception as e:
-                                    print(f"[NFC] Cast error: {e}")
-                                    state.add_log(f"Cast failed: {e}")
+                                state.set_playing(True)
+                                def _do_cast(s=song):
+                                    try:
+                                        if s.get("type") == "audiobook":
+                                            prog = s.get("progress", {})
+                                            cast_audiobook(
+                                                s, config_path, config_lock, pi_ip,
+                                                start_index=prog.get("chapter_index", 0),
+                                                start_time=prog.get("current_time", 0),
+                                            )
+                                        else:
+                                            cast_song(s, config_path, config_lock, pi_ip)
+                                        print(f"[NFC] Now playing '{s['name']}'")
+                                        state.add_log(f"Now playing \"{s['name']}\"")
+                                        check_and_schedule_sleep(state, config_path, config_lock, pi_ip)
+                                    except Exception as e:
+                                        print(f"[NFC] Cast error: {e}")
+                                        state.add_log(f"Cast failed: {e}")
+                                        state.set_playing(False)
+                                t = threading.Thread(target=_do_cast, daemon=True)
+                                t.start()
                         else:
                             print(f"[NFC] No song found for id '{id_str}'")
                             state.add_log(f"No song found for ID \"{id_str}\"")
