@@ -76,13 +76,20 @@
     .chapter-list li { display: flex; align-items: center; gap: 6px; padding: 0.2rem 0; border-top: 1px solid #f0f0f5; font-size: 0.8rem; color: #555; }
     .chapter-list li:first-child { border-top: none; }
 
-    /* ── Activity log ─────────────────────────────────────── */
-    .activity-log {
-      max-height: 180px; overflow-y: auto;
-      font-family: 'Courier New', monospace; font-size: 0.78rem;
-      background: #13111c; color: #c9d1d9;
-      border-radius: 6px; padding: 0.7rem 0.9rem; line-height: 1.7;
+    /* ── Activity log (fixed bottom bar) ─────────────────── */
+    .activity-bar {
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      z-index: 50;
+      background: #13111c;
+      color: #c9d1d9;
+      font-family: 'Courier New', monospace; font-size: 0.75rem;
+      padding: 0.4rem 1rem;
+      border-top: 1px solid #2a2840;
+      max-height: 5rem; overflow: hidden;
     }
+    .activity-bar-entry { line-height: 1.6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    body { padding-bottom: 5.5rem; }
 
     /* ── Misc ─────────────────────────────────────────────── */
     .spin { animation: spin 1s linear infinite; display: inline-block; }
@@ -135,15 +142,14 @@
 
       <!-- Now playing (sticky) -->
       <div v-if="playbackStatus.playing" class="now-playing-bar">
-        <span>
+        <span style="color: white;">
           <span>▶</span>
-          <strong class="ml-2">{{ playbackStatus.song_name || 'Unknown' }}</strong>
-          <span v-if="playbackStatus.chapter_index != null" class="ml-2" style="opacity:0.75; font-size:0.88rem;">
+          <strong class="ml-2" style="color: white;">{{ playbackStatus.song_name || 'Unknown' }}</strong>
+          <span v-if="playbackStatus.chapter_index != null" class="ml-2" style="color: rgba(255,255,255,0.75); font-size:0.88rem;">
             Ch {{ playbackStatus.chapter_index + 1 }}<span v-if="playbackStatus.current_time"> · {{ formatTime(playbackStatus.current_time) }}</span>
           </span>
-          <span v-else-if="playbackStatus.current_time" class="ml-2" style="opacity:0.75; font-size:0.88rem;">· {{ formatTime(playbackStatus.current_time) }}</span>
-          <span class="tag is-warning is-light is-small ml-2">{{ playbackStatus.player_state }}</span>
-          <span v-if="nfcStatus.sleep_stops_at" class="tag is-info is-light is-small ml-1" :title="'Stops at ' + nfcStatus.sleep_stops_at">
+          <span v-else-if="playbackStatus.current_time" class="ml-2" style="color: rgba(255,255,255,0.75); font-size:0.88rem;">· {{ formatTime(playbackStatus.current_time) }}</span>
+          <span v-if="nfcStatus.sleep_stops_at" class="tag is-info is-light is-small ml-2" :title="'Stops at ' + nfcStatus.sleep_stops_at">
             🌙 {{ formatSleepCountdown(nfcStatus.sleep_stops_at) }}
           </span>
         </span>
@@ -456,18 +462,6 @@
         <p v-if="playStatus" class="help is-success mt-2">{{ playStatus }}</p>
       </div>
 
-      <!-- Activity log -->
-      <div class="box mt-4 mb-2">
-        <h2 class="title is-6 mb-3">NFC Activity</h2>
-        <div
-          class="activity-log"
-        >
-          <div v-if="activityLog.length === 0" class="has-text-grey" style="font-style: italic;">No activity yet...</div>
-          <div v-for="entry in [...activityLog].reverse()" :key="entry.seq" style="line-height: 1.6;">
-            <span style="color: #6272a4;">[{{ entry.time }}]</span> {{ entry.msg }}
-          </div>
-        </div>
-      </div>
 
       <p class="has-text-centered has-text-grey-light mt-3 mb-6">
         <small>Stonies — running on {{ piHost }}</small>
@@ -552,6 +546,19 @@
   </div>
 
   </div>
+
+  <!-- Fixed activity log bar -->
+  <div class="activity-bar">
+    <div v-if="activityLog.length === 0" style="color: #555; font-style: italic;">No activity yet...</div>
+    <div
+      v-for="entry in [...activityLog].slice(-3).reverse()"
+      :key="entry.seq"
+      class="activity-bar-entry"
+    >
+      <span style="color: #6272a4;">[{{ entry.time }}]</span> {{ entry.msg }}
+    </div>
+  </div>
+
 </div>
 
   <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
