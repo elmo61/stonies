@@ -100,29 +100,10 @@ i2cdetect -y 1  # should show '24' or '48' in the grid
 
 ## Auto-start on boot (systemd)
 
-The `setup.sh` script does this automatically. For a manual install:
+The `setup.sh` script does this automatically. For a manual install, copy the included service file:
 
 ```bash
-sudo nano /etc/systemd/system/stonies.service
-```
-
-```ini
-[Unit]
-Description=Stonies NFC Music Player
-After=network.target
-
-[Service]
-User=pi
-WorkingDirectory=/home/pi/stonies/projects/stonies
-ExecStart=/home/pi/stonies/projects/stonies/env/bin/python main.py
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
+sudo cp stonies.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable stonies
 sudo systemctl start stonies

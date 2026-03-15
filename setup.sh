@@ -50,7 +50,7 @@ After=network.target
 User=$SERVICE_USER
 WorkingDirectory=$APP_DIR
 ExecStart=$APP_DIR/env/bin/python main.py
-Restart=on-failure
+Restart=always
 RestartSec=5
 
 [Install]
