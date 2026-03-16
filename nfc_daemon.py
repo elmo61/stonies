@@ -270,9 +270,15 @@ def cast_audiobook(song, config_path, config_lock, pi_ip, start_index=0, start_t
 
     cast = chromecasts[0]
     try:
-        cast.wait()
+        cast.wait(timeout=10)
         pychromecast.discovery.stop_discovery(browser)
-        cast.media_controller.send_message(
+        mc = cast.media_controller
+        mc.update_status()
+        time.sleep(0.5)
+        if mc.status and mc.status.player_state not in (None, "IDLE", "UNKNOWN"):
+            mc.stop()
+            time.sleep(1)
+        mc.send_message(
             {
                 "type": "QUEUE_LOAD",
                 "repeatMode": "REPEAT_OFF",
@@ -282,7 +288,7 @@ def cast_audiobook(song, config_path, config_lock, pi_ip, start_index=0, start_t
             },
             inc_session_id=True,
         )
-        cast.media_controller.block_until_active()
+        mc.block_until_active(timeout=10)
     finally:
         cast.disconnect()
 
@@ -316,14 +322,20 @@ def cast_song(song, config_path, config_lock, pi_ip):
 
     cast = chromecasts[0]
     try:
-        cast.wait()
+        cast.wait(timeout=10)
         pychromecast.discovery.stop_discovery(browser)
-        cast.media_controller.play_media(
+        mc = cast.media_controller
+        mc.update_status()
+        time.sleep(0.5)
+        if mc.status and mc.status.player_state not in (None, "IDLE", "UNKNOWN"):
+            mc.stop()
+            time.sleep(1)
+        mc.play_media(
             url, mime,
             title=song.get("name", ""),
             thumb=song.get("image_url") or None,
         )
-        cast.media_controller.block_until_active()
+        mc.block_until_active(timeout=10)
     finally:
         cast.disconnect()
 
