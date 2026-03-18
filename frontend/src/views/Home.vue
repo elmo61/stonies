@@ -883,9 +883,15 @@ function onFileChange(event) {
 // Low-frequency background poll to keep offline last-seen and mode badge fresh
 let bgPollTimer = null
 function startBgPoll() {
+  if (bgPollTimer) { clearInterval(bgPollTimer); bgPollTimer = null }
+  const interval = nfcStatus.value.sleep_stops_at ? 10000 : 30000
   bgPollTimer = setInterval(async () => {
-    if (!nfcPollTimer) await pollNfcStatus()
-  }, 2000)
+    if (!nfcPollTimer) {
+      await pollNfcStatus()
+      // Restart with updated interval in case sleep_stops_at changed
+      startBgPoll()
+    }
+  }, interval)
 }
 
 async function uploadSong() {
