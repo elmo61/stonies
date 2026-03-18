@@ -10,7 +10,8 @@ from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
-from nfc_daemon import cast_audiobook, cast_song, lookup_song, check_and_schedule_sleep
+from nfc_daemon import cast_audiobook, cast_song, lookup_song, check_and_schedule_sleep, update_play_stats
+from activity_log import write_log
 
 
 AUDIO_EXTS = (".mp3", ".m4a")
@@ -77,7 +78,7 @@ def scan_audiobooks(music_folder, existing_songs):
     return new_entries
 
 
-def create_app(state, songs_lock, config_lock, music_folder, import_folder, images_folder, songs_path, config_path, pi_ip):
+def create_app(state, songs_lock, config_lock, music_folder, import_folder, images_folder, songs_path, config_path, pi_ip, log_path=None):
     base_dir = os.path.dirname(os.path.abspath(__file__))
     dist_dir = os.path.join(base_dir, "frontend", "dist")
     app = Flask(__name__, static_folder=dist_dir, static_url_path="")
@@ -578,8 +579,11 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
             else:
                 cast_song(song, config_path, config_lock, pi_ip)
                 state.set_now_playing(song_id)
+            update_play_stats(song_id, songs_path, songs_lock)
             state.add_log(f"Now playing \"{song['name']}\"")
-            check_and_schedule_sleep(state, config_path, config_lock, pi_ip)
+            if log_path:
+                write_log(log_path, f'"{song["name"]}" started playing (web)')
+            check_and_schedule_sleep(state, config_path, config_lock, pi_ip, log_path)
             return jsonify({"ok": True, "message": f"Now playing '{song['name']}'"})
         except Exception as e:
             state.set_playing(False)
@@ -660,6 +664,8 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
             state.set_playing(False)
             state.cancel_sleep()
             state.add_log(f"Playback stopped on \"{speaker_name}\"")
+            if log_path:
+                write_log(log_path, f'Playback stopped manually on "{speaker_name}"')
             return jsonify({"ok": True})
         except Exception as e:
             return jsonify({"error": str(e)}), 500

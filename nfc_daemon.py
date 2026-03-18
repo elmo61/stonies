@@ -213,6 +213,26 @@ def lookup_song(id_str, songs_path, songs_lock):
     return None
 
 
+def update_play_stats(song_id, songs_path, songs_lock):
+    """Increment play_count and update first_played / last_played for a song."""
+    now = datetime.now().isoformat(timespec="seconds")
+    with songs_lock:
+        try:
+            with open(songs_path, "r") as f:
+                songs = json.load(f)
+            for s in songs:
+                if s.get("id") == song_id:
+                    s["play_count"] = s.get("play_count", 0) + 1
+                    s["last_played"] = now
+                    if not s.get("first_played"):
+                        s["first_played"] = now
+                    break
+            with open(songs_path, "w") as f:
+                json.dump(songs, f, indent=2)
+        except Exception:
+            pass
+
+
 def cast_audiobook(song, config_path, config_lock, pi_ip, start_index=0, start_time=0):
     """Queue all chapters of an audiobook on the configured speaker. Raises on any failure."""
     import pychromecast
@@ -361,11 +381,12 @@ def sleep_timer_seconds(config):
     return None
 
 
-def make_stop_fn(config_path, config_lock, pi_ip, state):
+def make_stop_fn(config_path, config_lock, pi_ip, state, log_path=None):
     """Return a callback that stops Chromecast playback (used by sleep timer)."""
     def _stop():
         import pychromecast
         import time as _time
+        from activity_log import write_log
         try:
             with config_lock:
                 with open(config_path, "r") as f:
@@ -388,6 +409,8 @@ def make_stop_fn(config_path, config_lock, pi_ip, state):
                 _time.sleep(1)
                 mc.stop()
                 state.add_log("Sleep timer fired — playback stopped")
+                if log_path:
+                    write_log(log_path, "Sleep timer fired — playback stopped")
             finally:
                 cast.disconnect()
         except Exception as e:
@@ -399,7 +422,7 @@ def make_stop_fn(config_path, config_lock, pi_ip, state):
     return _stop
 
 
-def check_and_schedule_sleep(state, config_path, config_lock, pi_ip):
+def check_and_schedule_sleep(state, config_path, config_lock, pi_ip, log_path=None):
     """Read config and schedule a sleep timer if conditions are met."""
     try:
         with config_lock:
@@ -409,7 +432,7 @@ def check_and_schedule_sleep(state, config_path, config_lock, pi_ip):
         return
     secs = sleep_timer_seconds(cfg)
     if secs:
-        state.schedule_sleep(secs, make_stop_fn(config_path, config_lock, pi_ip, state))
+        state.schedule_sleep(secs, make_stop_fn(config_path, config_lock, pi_ip, state, log_path))
         state.add_log(f"Sleep timer set — stops in {secs // 60} min")
 
 
@@ -418,13 +441,14 @@ def check_and_schedule_sleep(state, config_path, config_lock, pi_ip):
 # ---------------------------------------------------------------------------
 
 def run_position_tracker(state, songs_path, songs_lock, config_path, config_lock):
-    """Background thread: polls Chromecast every 2 minutes and saves audiobook progress."""
+    """Background thread: polls Chromecast every 5 minutes as a fallback position save.
+    The cast_monitor handles most position updates via push events; this is a safety net."""
     import pychromecast
     from urllib.parse import unquote, urlparse
     import time as _time
 
     while True:
-        _time.sleep(120)
+        _time.sleep(300)
 
         with state._lock:
             playing = state._stonies_playing
@@ -433,14 +457,12 @@ def run_position_tracker(state, songs_path, songs_lock, config_path, config_lock
         if not playing or not song_id:
             continue
 
-        state.add_log("Position tracker: checking...")
         try:
             with config_lock:
                 with open(config_path, "r") as f:
                     config = json.load(f)
             speaker_name = config.get("speaker", "").strip()
             if not speaker_name:
-                state.add_log("Position tracker: no speaker configured")
                 continue
 
             chromecasts, browser = pychromecast.get_listed_chromecasts(
@@ -448,11 +470,11 @@ def run_position_tracker(state, songs_path, songs_lock, config_path, config_lock
             )
             if not chromecasts:
                 pychromecast.discovery.stop_discovery(browser)
-                state.add_log("Position tracker: speaker not found")
                 continue
 
             cast = chromecasts[0]
             player_state = None
+            idle_reason = None
             content_id = ""
             current_time = 0
             try:
@@ -464,13 +486,27 @@ def run_position_tracker(state, songs_path, songs_lock, config_path, config_lock
                 # Capture all values before disconnect clears the status object
                 if mc.status:
                     player_state = mc.status.player_state
+                    idle_reason = mc.status.idle_reason
                     content_id = mc.status.content_id or ""
                     current_time = round(mc.status.current_time or 0, 1)
             finally:
                 cast.disconnect()
 
             if player_state not in ("PLAYING", "PAUSED", "BUFFERING"):
-                state.add_log(f"Position tracker: not playing ({player_state})")
+                # If finished, clear audiobook progress so next play starts from beginning
+                if idle_reason == "FINISHED":
+                    with songs_lock:
+                        try:
+                            with open(songs_path, "r") as f:
+                                songs = json.load(f)
+                            for s in songs:
+                                if s.get("id") == song_id and s.get("type") == "audiobook":
+                                    s.pop("progress", None)
+                                    break
+                            with open(songs_path, "w") as f:
+                                json.dump(songs, f, indent=2)
+                        except Exception:
+                            pass
                 state.set_playing(False)
                 continue
 
@@ -526,8 +562,10 @@ def run_position_tracker(state, songs_path, songs_lock, config_path, config_lock
 # Daemon loop
 # ---------------------------------------------------------------------------
 
-def run_daemon(state, songs_path, songs_lock, config_path, config_lock, pi_ip):
+def run_daemon(state, songs_path, songs_lock, config_path, config_lock, pi_ip, log_path=None):
     """Background NFC loop. Owns the PN532 exclusively."""
+    from activity_log import write_log
+
     try:
         import board
         import busio
@@ -538,6 +576,8 @@ def run_daemon(state, songs_path, songs_lock, config_path, config_lock, pi_ip):
         pn532.SAM_configuration()
         print("[NFC] PN532 online. Listening for tags...")
         state.add_log("NFC reader online")
+        if log_path:
+            write_log(log_path, "NFC reader started")
     except Exception as e:
         msg = f"PN532 not available: {e}"
         print(f"[NFC] {msg}")
@@ -589,9 +629,12 @@ def run_daemon(state, songs_path, songs_lock, config_path, config_lock, pi_ip):
                                         else:
                                             cast_song(s, config_path, config_lock, pi_ip)
                                             state.set_now_playing(s["id"])
+                                        update_play_stats(s["id"], songs_path, songs_lock)
                                         print(f"[NFC] Now playing '{s['name']}'")
                                         state.add_log(f"Now playing \"{s['name']}\"")
-                                        check_and_schedule_sleep(state, config_path, config_lock, pi_ip)
+                                        if log_path:
+                                            write_log(log_path, f'"{s["name"]}" started playing (NFC)')
+                                        check_and_schedule_sleep(state, config_path, config_lock, pi_ip, log_path)
                                     except Exception as e:
                                         print(f"[NFC] Cast error: {e}")
                                         state.add_log(f"Cast failed: {e}")

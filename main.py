@@ -3,6 +3,7 @@ import socket
 import threading
 
 from nfc_daemon import NFCState, run_daemon, run_position_tracker
+from cast_monitor import CastMonitor
 from api import create_app
 
 
@@ -25,6 +26,7 @@ if __name__ == "__main__":
     images_folder = os.path.join(base_dir, "images")
     songs_path = os.path.join(base_dir, "songs.json")
     config_path = os.path.join(base_dir, "config.json")
+    log_path = os.path.join(base_dir, "activity.log")
 
     os.makedirs(music_folder, exist_ok=True)
     os.makedirs(import_folder, exist_ok=True)
@@ -39,7 +41,7 @@ if __name__ == "__main__":
 
     daemon_thread = threading.Thread(
         target=run_daemon,
-        args=(state, songs_path, songs_lock, config_path, config_lock, pi_ip),
+        args=(state, songs_path, songs_lock, config_path, config_lock, pi_ip, log_path),
         daemon=True,
     )
     daemon_thread.start()
@@ -51,6 +53,9 @@ if __name__ == "__main__":
     )
     tracker_thread.start()
 
-    app = create_app(state, songs_lock, config_lock, music_folder, import_folder, images_folder, songs_path, config_path, pi_ip)
+    monitor = CastMonitor(state, songs_path, songs_lock, config_path, config_lock, log_path)
+    monitor.start()
+
+    app = create_app(state, songs_lock, config_lock, music_folder, import_folder, images_folder, songs_path, config_path, pi_ip, log_path)
     print(f"[Main] Starting Flask on http://{pi_ip}:5000")
     app.run(host="0.0.0.0", port=5000, threaded=True)
