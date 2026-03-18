@@ -74,16 +74,12 @@ class CastMonitor:
                         backoff = min(backoff * 2, 120)
                         continue
                     backoff = 15  # reset on success
-                else:
-                    # Check the socket is still alive
-                    try:
-                        if not self._cast.socket_client.connected:
-                            print("[Monitor] Connection lost — reconnecting")
-                            self._disconnect()
-                    except Exception:
-                        self._disconnect()
 
-                time.sleep(10)
+                # Connection established — pychromecast manages the socket
+                # and delivers callbacks on its own background thread.
+                # Sleep and let it do its thing; we only reconnect on exception
+                # or if the speaker config changes.
+                time.sleep(60)
 
             except Exception as e:
                 print(f"[Monitor] Unexpected error: {e}")
