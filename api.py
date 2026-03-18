@@ -79,16 +79,25 @@ def scan_audiobooks(music_folder, existing_songs):
 
 def create_app(state, songs_lock, config_lock, music_folder, import_folder, images_folder, songs_path, config_path, pi_ip):
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    app = Flask(__name__, static_folder=base_dir, static_url_path="")
+    dist_dir = os.path.join(base_dir, "frontend", "dist")
+    app = Flask(__name__, static_folder=dist_dir, static_url_path="")
     CORS(app)
 
     # ------------------------------------------------------------------
-    # Frontend
+    # Frontend — serve Vue SPA (history mode: all unknown routes → index.html)
     # ------------------------------------------------------------------
 
-    @app.route("/")
-    def index():
-        return send_file(os.path.join(base_dir, "index.html"))
+    @app.route("/", defaults={"path": ""})
+    @app.route("/<path:path>")
+    def index(path):
+        # API routes are handled before this catch-all
+        if path.startswith("api/") or path.startswith("music/") or path.startswith("images/"):
+            from flask import abort
+            abort(404)
+        file_path = os.path.join(dist_dir, path)
+        if path and os.path.isfile(file_path):
+            return send_file(file_path)
+        return send_file(os.path.join(dist_dir, "index.html"))
 
     # ------------------------------------------------------------------
     # Audio serving
@@ -510,6 +519,24 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
         state.add_log(f"Tag write requested for \"{song['name']}\"")
         state.request_write(song_id)
         return jsonify({"ok": True, "status": "pending"})
+
+    # ------------------------------------------------------------------
+    # Activity log
+    # ------------------------------------------------------------------
+
+    log_path = os.path.join(base_dir, "activity.log")
+
+    @app.route("/api/log")
+    def get_log():
+        try:
+            with open(log_path, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+            lines = [l.rstrip("\n") for l in lines if l.strip()]
+            return jsonify({"lines": lines[-1000:][::-1]})  # newest first
+        except FileNotFoundError:
+            return jsonify({"lines": []})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
 
     # ------------------------------------------------------------------
     # Offline mode toggle

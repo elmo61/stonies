@@ -1,0 +1,102 @@
+@import 'https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css';
+
+/* ── Page ─────────────────────────────────────────────── */
+body {
+  background: linear-gradient(160deg, #e8edf8 0%, #f2f4f9 50%, #f5f5f5 100%);
+  min-height: 100vh;
+}
+
+/* ── Hero ─────────────────────────────────────────────── */
+.hero {
+  background: linear-gradient(135deg, #1a1a2e 0%, #0f3460 55%, #16213e 100%);
+}
+.hero .title { letter-spacing: 0.03em; }
+
+/* ── Boxes ────────────────────────────────────────────── */
+.box { box-shadow: 0 2px 12px rgba(0,0,0,0.06); border-radius: 10px; }
+
+/* ── Settings summary bar ─────────────────────────────── */
+.settings-bar {
+  background: linear-gradient(135deg, #f8f9ff 0%, #ffffff 100%);
+  border: 1px solid #e2e7f3;
+}
+
+/* ── Now-playing bar (sticky) ─────────────────────────── */
+.now-playing-bar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background: linear-gradient(135deg, #0f3460, #1a1a2e);
+  border-radius: 10px;
+  box-shadow: 0 4px 24px rgba(15,52,96,0.4);
+  color: white;
+  padding: 0.75rem 1.1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+.now-playing-bar .tag { opacity: 0.85; }
+
+/* ── Song table ───────────────────────────────────────── */
+.song-row td { vertical-align: middle; padding: 0.65rem 0.5rem; border-bottom: 1px solid #f0f0f5; }
+.song-row { transition: box-shadow 0.12s; }
+.song-row:hover td { background: #f0f5ff; }
+.song-row:hover { box-shadow: inset 3px 0 0 #3273dc; }
+.song-row.is-audiobook td { background: #fffdf5; }
+.song-row.is-audiobook { box-shadow: inset 3px 0 0 #f0a500; }
+.song-row.is-audiobook:hover td { background: #fff8e8; }
+.song-row.is-audiobook:hover { box-shadow: inset 3px 0 0 #d4860a; }
+
+/* ── Song icon / thumbnail ────────────────────────────── */
+.song-icon {
+  width: 48px; height: 48px;
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.5rem;
+  flex-shrink: 0;
+}
+.song-icon.is-track   { background: #e8eeff; }
+.song-icon.is-audiobook { background: #fff0cc; }
+.song-thumb { width: 48px; height: 48px; object-fit: cover; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
+
+/* ── Song name ────────────────────────────────────────── */
+.song-name { font-size: 0.97rem; font-weight: 600; color: #222; }
+.song-meta { font-size: 0.75rem; color: #888; margin-top: 1px; }
+
+/* ── Chapter list ─────────────────────────────────────── */
+.chapter-list { list-style: none; padding: 0; margin: 0.4rem 0 0 0; }
+.chapter-list li { display: flex; align-items: center; gap: 6px; padding: 0.2rem 0; border-top: 1px solid #f0f0f5; font-size: 0.8rem; color: #555; }
+.chapter-list li:first-child { border-top: none; }
+
+/* ── Activity log (fixed bottom bar) ─────────────────── */
+.activity-bar {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  z-index: 50;
+  background: #13111c;
+  color: #c9d1d9;
+  font-family: 'Courier New', monospace; font-size: 0.75rem;
+  padding: 0.4rem 1rem;
+  border-top: 1px solid #2a2840;
+  max-height: 8rem; overflow-y: auto;
+}
+.activity-bar-entry { line-height: 1.6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+body { padding-bottom: 9rem; }
+
+/* ── Misc ─────────────────────────────────────────────── */
+.spin { animation: spin 1s linear infinite; display: inline-block; }
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+.upload-form { border-top: 1px solid #e8e8e8; margin-top: 1rem; padding-top: 1.25rem; }
+
+/* ── Song actions column ───────────────────────────────── */
+.song-actions { width: 160px; text-align: right; white-space: nowrap; }
+.song-actions .buttons { flex-wrap: nowrap; gap: 3px; }
+
+/* ── Mobile ────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  .song-actions { width: auto; white-space: normal; padding-left: 0; }
+  .song-actions .buttons { flex-wrap: wrap; }
+  .now-playing-bar { flex-direction: column; align-items: flex-start; gap: 0.5rem; }
+  .now-playing-bar button { align-self: flex-end; }
+}
