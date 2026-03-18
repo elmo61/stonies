@@ -98,11 +98,11 @@
               <strong v-if="savedSpeaker">{{ savedSpeaker }}</strong>
               <span v-else class="has-text-grey-light">No speaker set</span>
             </span>
-            <span class="has-text-grey-light" aria-hidden="true">·</span>
-            <span v-if="sleepTimer.enabled" class="has-text-grey">
+            <span class="has-text-grey-light is-hidden-mobile" aria-hidden="true">·</span>
+            <span v-if="sleepTimer.enabled" class="has-text-grey is-hidden-mobile">
               🌙 After {{ sleepTimer.after_time }}, {{ sleepTimer.duration_minutes }} min
             </span>
-            <span v-else class="has-text-grey-light">🌙 Sleep timer off</span>
+            <span v-else class="has-text-grey-light is-hidden-mobile">🌙 Sleep timer off</span>
           </div>
           <div class="level-right" style="gap: 0.5rem;">
             <span v-if="updateAvailable" class="tag is-warning" :title="`${updateCommits} commit${updateCommits !== 1 ? 's' : ''} behind origin/main`">
