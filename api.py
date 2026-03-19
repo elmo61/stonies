@@ -87,8 +87,6 @@ def run_sync(peer_hostname, pi_ip, songs_path, songs_lock, music_folder,
     """Background thread: pulls missing songs from a peer Stonies device."""
     from activity_log import write_log as _write_log
 
-    peer_url = f"http://{peer_hostname}:5000"
-
     def update(**kwargs):
         with sync_job_lock:
             sync_job.update(kwargs)
@@ -98,8 +96,24 @@ def run_sync(peer_hostname, pi_ip, songs_path, songs_lock, music_folder,
     try:
         update(status="running", current="Fetching catalogue from peer...")
 
-        req = urllib.request.urlopen(f"{peer_url}/api/songs", timeout=15)
-        peer_songs = json.loads(req.read().decode()).get("songs", [])
+        # Try hostname as-is, then with .local
+        candidates = [peer_hostname]
+        if not peer_hostname.endswith(".local"):
+            candidates.append(peer_hostname + ".local")
+        peer_songs = None
+        resolved_host = peer_hostname
+        last_err = None
+        for h in candidates:
+            try:
+                req = urllib.request.urlopen(f"http://{h}:5000/api/songs", timeout=15)
+                peer_songs = json.loads(req.read().decode()).get("songs", [])
+                resolved_host = h
+                break
+            except Exception as e:
+                last_err = e
+        if peer_songs is None:
+            raise last_err
+        peer_url = f"http://{resolved_host}:5000"
 
         with songs_lock:
             try:
@@ -646,17 +660,43 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
                  "pulled": [], "skipped": [], "errors": []}
     _sync_job_lock = threading.Lock()
 
+    def _normalise_peer(raw):
+        """Strip http(s)://, port, and trailing slashes from a peer hostname."""
+        h = raw.strip()
+        for prefix in ("https://", "http://"):
+            if h.startswith(prefix):
+                h = h[len(prefix):]
+        h = h.split("/")[0]   # drop any path
+        h = h.rsplit(":", 1)[0]  # drop port if present
+        return h.strip()
+
+    def _fetch_peer_songs(hostname):
+        """Try hostname as-is, then with .local appended. Returns (songs, resolved_hostname)."""
+        candidates = [hostname]
+        if not hostname.endswith(".local"):
+            candidates.append(hostname + ".local")
+        last_err = None
+        for h in candidates:
+            try:
+                url = f"http://{h}:5000/api/songs"
+                req = urllib.request.urlopen(url, timeout=10)
+                songs = json.loads(req.read().decode()).get("songs", [])
+                return songs, h
+            except Exception as e:
+                last_err = e
+        raise last_err
+
     @app.route("/api/sync/preview", methods=["POST"])
     def sync_preview():
         body = request.get_json(silent=True) or {}
-        peer = body.get("peer", "").strip()
-        if not peer:
+        raw_peer = body.get("peer", "").strip()
+        if not raw_peer:
             return jsonify({"error": "peer is required"}), 400
 
-        peer_url = f"http://{peer}:5000"
+        peer = _normalise_peer(raw_peer)
         try:
-            req = urllib.request.urlopen(f"{peer_url}/api/songs", timeout=10)
-            peer_songs = json.loads(req.read().decode()).get("songs", [])
+            peer_songs, resolved = _fetch_peer_songs(peer)
+            peer = resolved  # use whichever hostname actually worked
         except Exception as e:
             return jsonify({"error": f"Cannot reach {peer}: {e}"}), 400
 
@@ -694,9 +734,10 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
     @app.route("/api/sync/pull", methods=["POST"])
     def sync_pull():
         body = request.get_json(silent=True) or {}
-        peer = body.get("peer", "").strip()
-        if not peer:
+        raw_peer = body.get("peer", "").strip()
+        if not raw_peer:
             return jsonify({"error": "peer is required"}), 400
+        peer = _normalise_peer(raw_peer)
 
         with _sync_job_lock:
             if _sync_job.get("status") == "running":

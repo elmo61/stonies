@@ -353,11 +353,11 @@
             <div class="field has-addons mb-0">
               <div class="control is-expanded">
                 <input class="input" type="text" v-model="syncPeer"
-                  placeholder="stonies-bedroom"
+                  placeholder="stonies-bedroom.local"
                   @keyup.enter="syncDoPreview" />
               </div>
             </div>
-            <p class="help">Just the hostname — e.g. <code>stonies-bedroom</code></p>
+            <p class="help">Use the <code>.local</code> suffix — e.g. <code>stonies-bedroom.local</code></p>
           </div>
           <p v-if="syncError" class="help is-danger mt-2">{{ syncError }}</p>
         </template>
