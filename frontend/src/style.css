@@ -6,12 +6,6 @@ body {
   min-height: 100vh;
 }
 
-/* ── Hero ─────────────────────────────────────────────── */
-.hero {
-  background: linear-gradient(135deg, #1a1a2e 0%, #0f3460 55%, #16213e 100%);
-}
-.hero .title { letter-spacing: 0.03em; }
-
 /* ── Boxes ────────────────────────────────────────────── */
 .box { box-shadow: 0 2px 12px rgba(0,0,0,0.06); border-radius: 10px; }
 
@@ -21,11 +15,8 @@ body {
   border: 1px solid #e2e7f3;
 }
 
-/* ── Now-playing bar (sticky) ─────────────────────────── */
+/* ── Now-playing bar ──────────────────────────────────── */
 .now-playing-bar {
-  position: sticky;
-  top: 0;
-  z-index: 40;
   background: linear-gradient(135deg, #0f3460, #1a1a2e);
   border-radius: 10px;
   box-shadow: 0 4px 24px rgba(15,52,96,0.4);
@@ -69,20 +60,6 @@ body {
 .chapter-list li { display: flex; align-items: center; gap: 6px; padding: 0.2rem 0; border-top: 1px solid #f0f0f5; font-size: 0.8rem; color: #555; }
 .chapter-list li:first-child { border-top: none; }
 
-/* ── Activity log (fixed bottom bar) ─────────────────── */
-.activity-bar {
-  position: fixed;
-  bottom: 0; left: 0; right: 0;
-  z-index: 50;
-  background: #13111c;
-  color: #c9d1d9;
-  font-family: 'Courier New', monospace; font-size: 0.75rem;
-  padding: 0.4rem 1rem;
-  border-top: 1px solid #2a2840;
-  max-height: 8rem; overflow-y: auto;
-}
-.activity-bar-entry { line-height: 1.6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-body { padding-bottom: 9rem; }
 
 /* ── Misc ─────────────────────────────────────────────── */
 .spin { animation: spin 1s linear infinite; display: inline-block; }

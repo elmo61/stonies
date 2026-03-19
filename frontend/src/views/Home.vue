@@ -408,25 +408,6 @@
     </div>
   </div>
 
-  <!-- Fixed activity log bar -->
-  <div class="activity-bar">
-    <div style="color: #4a4060; font-size: 0.7rem; margin-bottom: 0.2rem;">
-      NFC reader:
-      <span v-if="nfcStatus.hw_error" style="color: #e05;">offline</span>
-      <span v-else-if="nfcStatus.nfc_heartbeat_age === null" style="color: #888;">starting...</span>
-      <span v-else-if="nfcStatus.nfc_heartbeat_age > 10" style="color: #e05;">⚠ stuck ({{ nfcStatus.nfc_heartbeat_age }}s ago)</span>
-      <span v-else style="color: #4a9;">● active ({{ nfcStatus.nfc_heartbeat_age }}s ago)</span>
-    </div>
-    <div v-if="activityLog.length === 0" style="color: #555; font-style: italic;">No activity yet...</div>
-    <div
-      v-for="entry in [...activityLog].slice(-5).reverse()"
-      :key="entry.seq"
-      class="activity-bar-entry"
-    >
-      <span style="color: #6272a4;">[{{ entry.time }}]</span> {{ entry.msg }}
-    </div>
-  </div>
-
   </div>
 </template>
 
@@ -559,7 +540,6 @@ async function pollNfcStatus() {
     const data = await res.json()
     const prev = nfcStatus.value
     nfcStatus.value = data
-    ingestLog(data.log)
     // Transition into success — start countdown and reload songs
     if (data.sub_state === 'success' && prev.sub_state !== 'success') {
       await loadSongs()
@@ -689,19 +669,6 @@ async function scanImports() {
     songError.value = `Scan error: ${e.message}`
   } finally {
     scanning.value = false
-  }
-}
-
-// --- Activity log ---
-const activityLog = ref([])
-let lastLogSeq = 0
-
-function ingestLog(entries) {
-  if (!entries) return
-  const fresh = entries.filter(e => e.seq > lastLogSeq)
-  if (fresh.length) {
-    activityLog.value = [...activityLog.value, ...fresh]
-    lastLogSeq = fresh[fresh.length - 1].seq
   }
 }
 

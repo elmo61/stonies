@@ -12,12 +12,46 @@
     </router-link>
 
     <div class="stonies-links">
+      <span v-if="nfcLabel" class="nfc-indicator" :class="nfcClass">{{ nfcLabel }}</span>
       <router-link to="/" exact-active-class="is-active">Home</router-link>
       <router-link to="/log" exact-active-class="is-active">Logs</router-link>
     </div>
   </nav>
   <router-view />
 </template>
+
+<script setup>
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+
+const nfcStatus = ref({})
+let pollTimer = null
+
+async function poll() {
+  try {
+    const res = await fetch('/api/nfc/status')
+    nfcStatus.value = await res.json()
+  } catch (_) {}
+  pollTimer = setTimeout(poll, nfcStatus.value.sleep_stops_at ? 10000 : 30000)
+}
+
+const nfcLabel = computed(() => {
+  const s = nfcStatus.value
+  if (!s || Object.keys(s).length === 0) return null
+  if (s.hw_error) return 'NFC Offline'
+  if (s.nfc_heartbeat_age === null || s.nfc_heartbeat_age === undefined) return null
+  if (s.nfc_heartbeat_age > 10) return `NFC ⚠ (${s.nfc_heartbeat_age}s ago)`
+  return `NFC Active (${s.nfc_heartbeat_age}s ago)`
+})
+
+const nfcClass = computed(() => {
+  const s = nfcStatus.value
+  if (s.hw_error || s.nfc_heartbeat_age > 10) return 'is-warning'
+  return 'is-ok'
+})
+
+onMounted(() => poll())
+onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer) })
+</script>
 
 <style scoped>
 .stonies-nav {
@@ -79,5 +113,26 @@
 .stonies-links a.is-active {
   color: white;
   background: rgba(255, 255, 255, 0.15);
+}
+
+.nfc-indicator {
+  font-size: 0.75rem;
+  padding: 0.15rem 0.6rem;
+  border-radius: 20px;
+  margin-right: 0.4rem;
+  white-space: nowrap;
+}
+
+.nfc-indicator.is-ok {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.nfc-indicator.is-warning {
+  color: #ffdd57;
+}
+
+/* Hide NFC text on very small screens to keep nav single-line */
+@media (max-width: 400px) {
+  .nfc-indicator { display: none; }
 }
 </style>
