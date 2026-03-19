@@ -1,33 +1,7 @@
 <template>
   <div id="app">
 
-    <!-- Header -->
-    <section class="hero is-dark mb-5">
-      <div class="hero-body">
-        <div class="container">
-          <div class="level">
-            <div class="level-left">
-              <div>
-                <p class="title">Stonies</p>
-                <p class="subtitle">NFC-triggered Chromecast music player</p>
-              </div>
-            </div>
-            <div class="level-right">
-              <span
-                class="tag is-medium"
-                :class="nfcBadgeClass"
-                :title="nfcStatus.hw_error || ''"
-              >
-                <span v-if="nfcStatus.mode === 'writing'" class="spin mr-1">⟳</span>
-                {{ nfcBadgeLabel }}
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <div class="container" style="max-width: 860px;">
+    <div class="container" style="max-width: 860px; padding-top: 1.25rem;">
 
       <!-- Now playing (sticky) -->
       <div v-if="playbackStatus.playing" class="now-playing-bar">
@@ -567,18 +541,6 @@ const nfcBannerDismissed = ref(false)
 const successCountdown = ref(0)
 let nfcPollTimer = null
 let countdownTimer = null
-
-const nfcBadgeLabel = computed(() => {
-  if (nfcStatus.value.hw_error) return 'NFC Unavailable'
-  if (nfcStatus.value.mode === 'writing') return 'Writing Tag...'
-  return 'Listening'
-})
-
-const nfcBadgeClass = computed(() => {
-  if (nfcStatus.value.hw_error) return 'is-warning'
-  if (nfcStatus.value.mode === 'writing') return 'is-info'
-  return 'is-success'
-})
 
 const nfcBannerClass = computed(() => {
   const s = nfcStatus.value.sub_state
