@@ -93,8 +93,6 @@ body { padding-bottom: 9rem; }
 .song-actions { width: 160px; text-align: right; white-space: nowrap; }
 .song-actions .buttons { flex-wrap: nowrap; gap: 3px; }
 
-/* ── Navbar active link ────────────────────────────────── */
-.navbar-item.is-active { background: rgba(255,255,255,0.15) !important; }
 
 /* ── Mobile ────────────────────────────────────────────── */
 @media (max-width: 640px) {
