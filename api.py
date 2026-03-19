@@ -3,6 +3,10 @@ import os
 import re
 import secrets
 import shutil
+import threading
+import urllib.request
+import urllib.error
+from urllib.parse import quote as url_quote
 from datetime import datetime
 
 import pychromecast
@@ -76,6 +80,119 @@ def scan_audiobooks(music_folder, existing_songs):
         })
 
     return new_entries
+
+
+def run_sync(peer_hostname, pi_ip, songs_path, songs_lock, music_folder,
+             images_folder, sync_job, sync_job_lock, log_path=None):
+    """Background thread: pulls missing songs from a peer Stonies device."""
+    from activity_log import write_log as _write_log
+
+    peer_url = f"http://{peer_hostname}:5000"
+
+    def update(**kwargs):
+        with sync_job_lock:
+            sync_job.update(kwargs)
+
+    pulled, errors = [], []
+
+    try:
+        update(status="running", current="Fetching catalogue from peer...")
+
+        req = urllib.request.urlopen(f"{peer_url}/api/songs", timeout=15)
+        peer_songs = json.loads(req.read().decode()).get("songs", [])
+
+        with songs_lock:
+            try:
+                with open(songs_path) as f:
+                    local_songs = json.load(f)
+            except Exception:
+                local_songs = []
+
+        local_ids = {s["id"] for s in local_songs}
+        missing = [s for s in peer_songs if s["id"] not in local_ids]
+
+        if not missing:
+            update(status="complete", total=0, done=0, current="",
+                   pulled=[], skipped=[], errors=[])
+            return
+
+        update(total=len(missing), done=0)
+
+        for song in missing:
+            song_name = song.get("name", "Unknown")
+            song_id = song["id"]
+            update(current=song_name)
+
+            try:
+                song_copy = {
+                    "id": song_id,
+                    "type": song.get("type", "track"),
+                    "name": song_name,
+                    "image_url": "",
+                    "uploaded_at": song.get("uploaded_at", ""),
+                }
+
+                # Download cover image
+                peer_img = song.get("image_url", "")
+                if peer_img and "/images/" in peer_img:
+                    img_filename = peer_img.rsplit("/images/", 1)[-1]
+                    local_img = os.path.join(images_folder, img_filename)
+                    urllib.request.urlretrieve(
+                        f"{peer_url}/images/{url_quote(img_filename)}", local_img
+                    )
+                    song_copy["image_url"] = f"http://{pi_ip}:5000/images/{img_filename}"
+
+                if song.get("type") == "audiobook":
+                    folder = song.get("folder", song_id)
+                    chapters = song.get("chapters", [])
+                    folder_path = os.path.join(music_folder, folder)
+                    os.makedirs(folder_path, exist_ok=True)
+                    for ch in chapters:
+                        ch_file = ch["filename"]
+                        urllib.request.urlretrieve(
+                            f"{peer_url}/music/{url_quote(folder)}/{url_quote(ch_file)}",
+                            os.path.join(folder_path, ch_file),
+                        )
+                    song_copy["folder"] = folder
+                    song_copy["chapters"] = [
+                        {"filename": ch["filename"], "name": ch["name"]}
+                        for ch in chapters
+                    ]
+                else:
+                    filename = song.get("filename", "")
+                    urllib.request.urlretrieve(
+                        f"{peer_url}/music/{url_quote(filename)}",
+                        os.path.join(music_folder, filename),
+                    )
+                    song_copy["filename"] = filename
+
+                # Append to local songs.json
+                with songs_lock:
+                    with open(songs_path) as f:
+                        songs = json.load(f)
+                    # Double-check it still doesn't exist (race safety)
+                    if not any(s["id"] == song_id for s in songs):
+                        songs.append(song_copy)
+                        with open(songs_path, "w") as f:
+                            json.dump(songs, f, indent=2)
+
+                pulled.append(song_name)
+
+            except Exception as e:
+                errors.append(f"{song_name}: {e}")
+
+            with sync_job_lock:
+                sync_job["done"] += 1
+                sync_job["pulled"] = list(pulled)
+                sync_job["errors"] = list(errors)
+
+        if log_path and pulled:
+            _write_log(log_path, f"Sync from {peer_hostname}: pulled {len(pulled)} song(s)")
+
+        update(status="complete", current="", pulled=pulled, skipped=[], errors=errors)
+
+    except Exception as e:
+        update(status="error", current="", errors=[str(e)])
 
 
 def create_app(state, songs_lock, config_lock, music_folder, import_folder, images_folder, songs_path, config_path, pi_ip, log_path=None):
@@ -520,6 +637,86 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
         state.add_log(f"Tag write requested for \"{song['name']}\"")
         state.request_write(song_id)
         return jsonify({"ok": True, "status": "pending"})
+
+    # ------------------------------------------------------------------
+    # Device sync
+    # ------------------------------------------------------------------
+
+    _sync_job = {"status": "idle", "total": 0, "done": 0, "current": "",
+                 "pulled": [], "skipped": [], "errors": []}
+    _sync_job_lock = threading.Lock()
+
+    @app.route("/api/sync/preview", methods=["POST"])
+    def sync_preview():
+        body = request.get_json(silent=True) or {}
+        peer = body.get("peer", "").strip()
+        if not peer:
+            return jsonify({"error": "peer is required"}), 400
+
+        peer_url = f"http://{peer}:5000"
+        try:
+            req = urllib.request.urlopen(f"{peer_url}/api/songs", timeout=10)
+            peer_songs = json.loads(req.read().decode()).get("songs", [])
+        except Exception as e:
+            return jsonify({"error": f"Cannot reach {peer}: {e}"}), 400
+
+        with songs_lock:
+            try:
+                with open(songs_path) as f:
+                    local_songs = json.load(f)
+            except Exception:
+                local_songs = []
+
+        local_ids = {s["id"] for s in local_songs}
+        missing = [
+            {
+                "id": s["id"],
+                "name": s.get("name"),
+                "type": s.get("type", "track"),
+                "chapter_count": len(s.get("chapters", [])) if s.get("type") == "audiobook" else None,
+            }
+            for s in peer_songs if s["id"] not in local_ids
+        ]
+
+        # Save peer hostname to config for next time
+        with config_lock:
+            try:
+                with open(config_path) as f:
+                    cfg = json.load(f)
+            except Exception:
+                cfg = {}
+            cfg["sync_peer"] = peer
+            with open(config_path, "w") as f:
+                json.dump(cfg, f, indent=2)
+
+        return jsonify({"missing": missing, "peer": peer})
+
+    @app.route("/api/sync/pull", methods=["POST"])
+    def sync_pull():
+        body = request.get_json(silent=True) or {}
+        peer = body.get("peer", "").strip()
+        if not peer:
+            return jsonify({"error": "peer is required"}), 400
+
+        with _sync_job_lock:
+            if _sync_job.get("status") == "running":
+                return jsonify({"error": "Sync already in progress"}), 409
+            _sync_job.update({"status": "running", "total": 0, "done": 0,
+                               "current": "Starting...", "pulled": [], "skipped": [], "errors": []})
+
+        t = threading.Thread(
+            target=run_sync,
+            args=(peer, pi_ip, songs_path, songs_lock, music_folder,
+                  images_folder, _sync_job, _sync_job_lock, log_path),
+            daemon=True,
+        )
+        t.start()
+        return jsonify({"ok": True})
+
+    @app.route("/api/sync/status")
+    def sync_status():
+        with _sync_job_lock:
+            return jsonify(dict(_sync_job))
 
     # ------------------------------------------------------------------
     # Activity log

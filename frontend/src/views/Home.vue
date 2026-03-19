@@ -105,6 +105,9 @@
               >
                 📥 Scan Imports
               </button>
+              <button class="button is-light is-small" @click="openSync">
+                ⇄ Sync Device
+              </button>
               <button class="button is-primary is-small" @click="showUpload = !showUpload; if (!showUpload) setUploadType('track')">
                 {{ showUpload ? 'Cancel' : '+ Add Song' }}
               </button>
@@ -332,6 +335,129 @@
 
     </div>
 
+  <!-- Sync modal -->
+  <div class="modal" :class="{'is-active': showSync}">
+    <div class="modal-background" @click="closeSync"></div>
+    <div class="modal-card" style="max-width: 480px; width: 90%;">
+      <header class="modal-card-head">
+        <p class="modal-card-title">⇄ Sync Device</p>
+        <button class="delete" aria-label="close" @click="closeSync"></button>
+      </header>
+      <section class="modal-card-body">
+
+        <!-- Step: input -->
+        <template v-if="syncStep === 'input'">
+          <p class="mb-3 has-text-grey">Enter the hostname of another Stonies device on your network to pull songs you don't have yet.</p>
+          <div class="field">
+            <label class="label">Device hostname</label>
+            <div class="field has-addons mb-0">
+              <div class="control is-expanded">
+                <input class="input" type="text" v-model="syncPeer"
+                  placeholder="stonies-bedroom"
+                  @keyup.enter="syncDoPreview" />
+              </div>
+            </div>
+            <p class="help">Just the hostname — e.g. <code>stonies-bedroom</code></p>
+          </div>
+          <p v-if="syncError" class="help is-danger mt-2">{{ syncError }}</p>
+        </template>
+
+        <!-- Step: preview -->
+        <template v-else-if="syncStep === 'preview'">
+          <p class="mb-3">
+            Found <strong>{{ syncMissing.length }}</strong> song{{ syncMissing.length !== 1 ? 's' : '' }} on
+            <strong>{{ syncPeer }}</strong> that aren't on this device:
+          </p>
+          <div v-if="syncMissing.length === 0" class="notification is-success is-light">
+            This device is already up to date — no missing songs found.
+          </div>
+          <table v-else class="table is-fullwidth is-size-7 mb-0">
+            <tbody>
+              <tr v-for="song in syncMissing" :key="song.id">
+                <td>
+                  <span v-if="song.type === 'audiobook'">📚</span>
+                  <span v-else>🎵</span>
+                </td>
+                <td>
+                  {{ song.name }}
+                  <span v-if="song.type === 'audiobook'" class="has-text-grey"> · {{ song.chapter_count }} ch</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </template>
+
+        <!-- Step: pulling -->
+        <template v-else-if="syncStep === 'pulling'">
+          <p class="mb-2 has-text-grey">Pulling songs from <strong>{{ syncPeer }}</strong>...</p>
+          <progress class="progress is-info mb-2"
+            :value="syncStatus.done"
+            :max="syncStatus.total || 1">
+          </progress>
+          <p class="is-size-7 has-text-grey mb-1">
+            {{ syncStatus.done }} / {{ syncStatus.total }} songs
+          </p>
+          <p v-if="syncStatus.current" class="is-size-7">
+            <span class="spin">⟳</span> {{ syncStatus.current }}
+          </p>
+          <p v-if="syncStatus.errors && syncStatus.errors.length" class="help is-danger mt-2">
+            {{ syncStatus.errors.length }} error(s) so far
+          </p>
+        </template>
+
+        <!-- Step: complete -->
+        <template v-else-if="syncStep === 'complete'">
+          <div class="notification is-success is-light mb-3" v-if="syncStatus.pulled && syncStatus.pulled.length">
+            <strong>✓ {{ syncStatus.pulled.length }} song{{ syncStatus.pulled.length !== 1 ? 's' : '' }} pulled successfully</strong>
+          </div>
+          <div class="notification is-info is-light mb-3" v-else-if="!syncStatus.errors || !syncStatus.errors.length">
+            <strong>Already up to date</strong> — no missing songs found.
+          </div>
+          <div v-if="syncStatus.errors && syncStatus.errors.length" class="notification is-warning is-light mb-0">
+            <strong>{{ syncStatus.errors.length }} error(s):</strong>
+            <ul class="mt-1">
+              <li v-for="(e, i) in syncStatus.errors" :key="i" class="is-size-7">{{ e }}</li>
+            </ul>
+          </div>
+        </template>
+
+      </section>
+      <footer class="modal-card-foot" style="justify-content: space-between;">
+        <div>
+          <button v-if="syncStep === 'preview' && syncMissing.length > 0"
+            class="button is-info"
+            @click="syncDoPull">
+            Pull {{ syncMissing.length }} song{{ syncMissing.length !== 1 ? 's' : '' }}
+          </button>
+          <button v-if="syncStep === 'preview'"
+            class="button is-light ml-2"
+            @click="syncStep = 'input'">
+            ← Back
+          </button>
+        </div>
+        <div>
+          <button v-if="syncStep === 'input'"
+            class="button is-info"
+            :class="{'is-loading': syncPreviewing}"
+            :disabled="!syncPeer.trim() || syncPreviewing"
+            @click="syncDoPreview">
+            Preview
+          </button>
+          <button v-if="syncStep === 'complete' || (syncStep === 'preview' && syncMissing.length === 0)"
+            class="button is-light"
+            @click="closeSync">
+            Done
+          </button>
+          <button v-if="syncStep !== 'pulling'"
+            class="button ml-2"
+            @click="closeSync">
+            {{ syncStep === 'input' ? 'Cancel' : 'Close' }}
+          </button>
+        </div>
+      </footer>
+    </div>
+  </div>
+
   <!-- Settings modal -->
   <div class="modal" :class="{'is-active': showSettings}">
     <div class="modal-background" @click="showSettings = false"></div>
@@ -464,6 +590,9 @@ async function loadConfig() {
     }
     if (data.sleep_timer) {
       sleepTimer.value = { ...sleepTimer.value, ...data.sleep_timer }
+    }
+    if (data.sync_peer) {
+      syncPeer.value = data.sync_peer
     }
   } catch (_) {}
 }
@@ -979,6 +1108,83 @@ async function clearProgress(song) {
   }
 }
 
+// --- Device sync ---
+const showSync = ref(false)
+const syncPeer = ref('')
+const syncStep = ref('input')   // input | preview | pulling | complete
+const syncMissing = ref([])
+const syncStatus = ref({})
+const syncPreviewing = ref(false)
+const syncError = ref('')
+let syncPollTimer = null
+
+function openSync() {
+  syncStep.value = 'input'
+  syncMissing.value = []
+  syncStatus.value = {}
+  syncError.value = ''
+  showSync.value = true
+}
+
+function closeSync() {
+  if (syncStep.value === 'pulling') return  // don't close mid-sync
+  showSync.value = false
+  if (syncPollTimer) { clearTimeout(syncPollTimer); syncPollTimer = null }
+  if (syncStep.value === 'complete') loadSongs()
+}
+
+async function syncDoPreview() {
+  if (!syncPeer.value.trim()) return
+  syncPreviewing.value = true
+  syncError.value = ''
+  try {
+    const res = await fetch(`${API}/sync/preview`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ peer: syncPeer.value.trim() }),
+    })
+    const data = await res.json()
+    if (data.error) throw new Error(data.error)
+    syncMissing.value = data.missing
+    syncStep.value = 'preview'
+  } catch (e) {
+    syncError.value = e.message
+  } finally {
+    syncPreviewing.value = false
+  }
+}
+
+async function syncDoPull() {
+  syncStep.value = 'pulling'
+  syncStatus.value = { done: 0, total: syncMissing.value.length, current: 'Starting...' }
+  try {
+    const res = await fetch(`${API}/sync/pull`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ peer: syncPeer.value.trim() }),
+    })
+    const data = await res.json()
+    if (data.error) throw new Error(data.error)
+    pollSyncStatus()
+  } catch (e) {
+    syncStatus.value = { status: 'error', errors: [e.message] }
+    syncStep.value = 'complete'
+  }
+}
+
+async function pollSyncStatus() {
+  try {
+    const res = await fetch(`${API}/sync/status`)
+    const data = await res.json()
+    syncStatus.value = data
+    if (data.status === 'complete' || data.status === 'error') {
+      syncStep.value = 'complete'
+      return
+    }
+  } catch (_) {}
+  syncPollTimer = setTimeout(pollSyncStatus, 2000)
+}
+
 onMounted(async () => {
   await Promise.all([loadConfig(), loadSpeakers(), loadSongs()])
   await pollNfcStatus()
@@ -991,5 +1197,6 @@ onUnmounted(() => {
   stopNfcPoll()
   if (bgPollTimer) clearInterval(bgPollTimer)
   if (playbackPollTimer) { clearTimeout(playbackPollTimer); playbackPollTimer = null }
+  if (syncPollTimer) { clearTimeout(syncPollTimer); syncPollTimer = null }
 })
 </script>
