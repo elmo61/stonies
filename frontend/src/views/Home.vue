@@ -19,6 +19,20 @@
         <button class="button is-danger is-small" :class="{'is-loading': stopping}" @click="stopPlayback">■ Stop</button>
       </div>
 
+      <!-- Local playback now-playing bar -->
+      <div v-if="localPlaying" class="now-playing-bar" style="background: #363636;">
+        <span style="color: white;">
+          <span>▶</span>
+          <strong class="ml-2" style="color: white;">{{ localSongName }}</strong>
+          <span v-if="localChapterIndex !== null" class="ml-2" style="color: rgba(255,255,255,0.75); font-size:0.88rem;">
+            Ch {{ localChapterIndex + 1 }}<span v-if="localCurrentTime"> · {{ formatTime(localCurrentTime) }}</span>
+          </span>
+          <span v-else-if="localCurrentTime" class="ml-2" style="color: rgba(255,255,255,0.75); font-size:0.88rem;">· {{ formatTime(localCurrentTime) }}</span>
+          <span class="tag is-light is-small ml-2">📱 This device</span>
+        </span>
+        <button class="button is-danger is-small" @click="stopLocalAudio">■ Stop</button>
+      </div>
+
       <!-- Offline mode toggle -->
       <div class="mb-4">
         <button
@@ -261,10 +275,14 @@
                   </div>
                   <ul v-if="song.type === 'audiobook' && expandedId === song.id" class="chapter-list mt-2">
                     <li v-for="(ch, i) in song.chapters" :key="ch.filename">
-                      <button class="button is-primary is-small py-0" style="height:1.4rem; min-width:1.8rem; font-size:0.7rem;"
+                      <button class="button is-light is-small py-0" style="height:1.4rem; min-width:1.8rem; font-size:0.7rem;"
+                        @click="playLocalChapter(song, i)" :title="`Play chapter ${i+1} on this device`">▶</button>
+                      <button class="button is-primary is-small py-0 ml-1" style="height:1.4rem; min-width:1.4rem;"
                         :class="{'is-loading': playingId === song.id}"
                         :disabled="!savedSpeaker || playingId !== null || nfcStatus.offline"
-                        @click="playChapter(song, i)" :title="`Play from chapter ${i+1}`">▶</button>
+                        @click="playChapter(song, i)" :title="`Cast chapter ${i+1} to ${savedSpeaker || 'speaker'}`">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="11" height="11" fill="currentColor" aria-hidden="true" style="vertical-align:middle;"><path d="M21 3H3c-1.1 0-2 .9-2 2v3h2V5h18v14h-7v2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM1 18v3h3c0-1.66-1.34-3-3-3zm0-4v2c2.76 0 5 2.24 5 5h2c0-3.87-3.13-7-7-7zm0-4v2c4.97 0 9 4.03 9 9h2c0-6.08-4.93-11-11-11z"/></svg>
+                      </button>
                       <span :class="playbackStatus.song_id === song.id && playbackStatus.chapter_index === i ? 'has-text-success has-text-weight-semibold' : ''">
                         {{ i+1 }}. {{ ch.name }}
                         <span v-if="playbackStatus.song_id === song.id && playbackStatus.chapter_index === i" style="font-size:0.7rem; color:#888;"> ▶ {{ formatTime(playbackStatus.current_time) }}</span>
@@ -295,12 +313,17 @@
               <!-- Actions -->
               <td class="song-actions">
                 <div class="buttons is-right">
+                  <button class="button is-light is-small"
+                    @click="playLocal(song)"
+                    :title="song.type === 'audiobook' && song.progress ? `Resume Ch ${(song.progress.chapter_index||0)+1} on this device` : 'Play on this device'">
+                    ▶
+                  </button>
                   <button class="button is-primary is-small"
                     :class="{'is-loading': playingId === song.id}"
                     :disabled="!savedSpeaker || playingId !== null || nfcStatus.offline"
                     @click="playSong(song)"
-                    :title="nfcStatus.offline ? 'Go online to play' : !savedSpeaker ? 'Save a speaker first' : song.type === 'audiobook' && song.progress ? `Resume Ch ${(song.progress.chapter_index||0)+1} on ${savedSpeaker}` : 'Play on ' + savedSpeaker">
-                    ▶
+                    :title="nfcStatus.offline ? 'Go online to cast' : !savedSpeaker ? 'Save a speaker first' : song.type === 'audiobook' && song.progress ? `Resume Ch ${(song.progress.chapter_index||0)+1} on ${savedSpeaker}` : 'Cast to ' + savedSpeaker">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true" style="vertical-align:middle;"><path d="M21 3H3c-1.1 0-2 .9-2 2v3h2V5h18v14h-7v2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM1 18v3h3c0-1.66-1.34-3-3-3zm0-4v2c2.76 0 5 2.24 5 5h2c0-3.87-3.13-7-7-7zm0-4v2c4.97 0 9 4.03 9 9h2c0-6.08-4.93-11-11-11z"/></svg>
                   </button>
                   <button class="button is-light is-small"
                     :disabled="editingId === song.id"
@@ -541,6 +564,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 
 const API = `http://${window.location.hostname}:5000/api`
+const BASE = `http://${window.location.hostname}:5000`
 const piHost = window.location.host
 
 // --- Speakers ---
@@ -1108,6 +1132,87 @@ async function clearProgress(song) {
   }
 }
 
+// --- Local (browser) audio playback ---
+let localAudio = null
+let localChapters = null
+const localPlaying = ref(false)
+const localSongId = ref(null)
+const localSongName = ref('')
+const localChapterIndex = ref(null)
+const localCurrentTime = ref(0)
+
+function stopLocalAudio() {
+  if (localAudio) {
+    localAudio.pause()
+    localAudio.src = ''
+    localAudio.onended = null
+    localAudio.ontimeupdate = null
+    localAudio.onloadedmetadata = null
+    localAudio.onerror = null
+    localAudio = null
+  }
+  localPlaying.value = false
+  localSongId.value = null
+  localSongName.value = ''
+  localChapterIndex.value = null
+  localCurrentTime.value = 0
+  localChapters = null
+}
+
+function _startLocalAudio(url, songId, songName, chapterIdx, startTime = 0) {
+  stopLocalAudio()
+  localAudio = new Audio(url)
+  localSongId.value = songId
+  localSongName.value = songName
+  localChapterIndex.value = chapterIdx
+  localCurrentTime.value = 0
+
+  if (startTime > 0) {
+    localAudio.onloadedmetadata = () => { if (localAudio) localAudio.currentTime = startTime }
+  }
+  localAudio.ontimeupdate = () => { if (localAudio) localCurrentTime.value = localAudio.currentTime }
+  localAudio.onended = () => {
+    if (localChapters && localChapterIndex.value !== null) {
+      const next = localChapterIndex.value + 1
+      if (next < localChapters.length) {
+        const song = songs.value.find(s => s.id === localSongId.value)
+        if (song) {
+          const ch = localChapters[next]
+          const nextUrl = `${BASE}/music/${encodeURIComponent(song.folder)}/${encodeURIComponent(ch.filename)}`
+          _startLocalAudio(nextUrl, song.id, song.name, next)
+          return
+        }
+      }
+    }
+    stopLocalAudio()
+  }
+  localAudio.onerror = () => stopLocalAudio()
+  localAudio.play().then(() => { localPlaying.value = true }).catch(() => stopLocalAudio())
+}
+
+function playLocal(song) {
+  if (song.type === 'audiobook') {
+    const prog = song.progress || {}
+    const chIdx = prog.chapter_index || 0
+    const startTime = prog.current_time || 0
+    localChapters = song.chapters
+    const ch = song.chapters[chIdx]
+    const url = `${BASE}/music/${encodeURIComponent(song.folder)}/${encodeURIComponent(ch.filename)}`
+    _startLocalAudio(url, song.id, song.name, chIdx, startTime)
+  } else {
+    localChapters = null
+    const url = `${BASE}/music/${encodeURIComponent(song.filename)}`
+    _startLocalAudio(url, song.id, song.name, null)
+  }
+}
+
+function playLocalChapter(song, chapterIndex) {
+  localChapters = song.chapters
+  const ch = song.chapters[chapterIndex]
+  const url = `${BASE}/music/${encodeURIComponent(song.folder)}/${encodeURIComponent(ch.filename)}`
+  _startLocalAudio(url, song.id, song.name, chapterIndex)
+}
+
 // --- Device sync ---
 const showSync = ref(false)
 const syncPeer = ref('')
@@ -1195,6 +1300,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   stopNfcPoll()
+  stopLocalAudio()
   if (bgPollTimer) clearInterval(bgPollTimer)
   if (playbackPollTimer) { clearTimeout(playbackPollTimer); playbackPollTimer = null }
   if (syncPollTimer) { clearTimeout(syncPollTimer); syncPollTimer = null }
