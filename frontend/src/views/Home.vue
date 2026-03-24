@@ -543,19 +543,13 @@
     </div>
   </div>
 
-  <!-- Fixed bottom player bar (local on-device playback) -->
-  <LocalPlayerBar
-    v-if="localPlayRequest"
-    :play-request="localPlayRequest"
-    @stopped="localPlayRequest = null"
-  />
 
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import LocalPlayerBar from '../components/LocalPlayerBar.vue'
+import { localPlayRequest } from '../playerStore'
 
 const API = `http://${window.location.hostname}:5000/api`
 const BASE = `http://${window.location.hostname}:5000`
@@ -1127,7 +1121,6 @@ async function clearProgress(song) {
 }
 
 // --- Local (browser) audio playback ---
-const localPlayRequest = ref(null)
 
 function playLocal(song) {
   const prog = song.progress || {}

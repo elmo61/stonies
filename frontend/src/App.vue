@@ -18,11 +18,18 @@
     </div>
   </nav>
   <router-view />
-  <footer v-if="disk" class="stonies-footer">{{ disk.free_gb }} GB free of {{ disk.total_gb }} GB</footer>
+  <LocalPlayerBar
+    v-if="localPlayRequest"
+    :play-request="localPlayRequest"
+    @stopped="localPlayRequest = null"
+  />
+  <footer v-if="disk" class="stonies-footer" :class="{ 'has-local-player': localPlayRequest }">{{ disk.free_gb }} GB free of {{ disk.total_gb }} GB</footer>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import LocalPlayerBar from './components/LocalPlayerBar.vue'
+import { localPlayRequest } from './playerStore'
 
 const nfcStatus = ref({})
 const disk = ref(null)
