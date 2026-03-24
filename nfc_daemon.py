@@ -595,6 +595,8 @@ def run_daemon(state, songs_path, songs_lock, config_path, config_lock, pi_ip, l
             if uid is not None:
                 uid_str = uid.hex().upper()
                 state.add_log(f"Tag detected: {uid_str}")
+                id_str = None
+                song = None
                 try:
                     raw = read_blocks(pn532)
                     print(f"[NFC] Tag read: '{raw}'")
@@ -649,7 +651,9 @@ def run_daemon(state, songs_path, songs_lock, config_path, config_lock, pi_ip, l
                 except Exception as e:
                     print(f"[NFC] Read error: {e}")
                     state.add_log(f"Read error: {e}")
-                time.sleep(3)  # debounce
+                # Longer pause after a recognised song so holding the tag doesn't re-trigger
+                debounce = 5 if (id_str and song) else 3
+                time.sleep(debounce)
 
         elif mode == "writing":
             song_id = state._get_write_id()

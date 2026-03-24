@@ -908,4 +908,12 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 
+    @app.route("/api/disk")
+    def api_disk():
+        usage = shutil.disk_usage(music_folder)
+        return jsonify({
+            "free_gb": round(usage.free / 1024 ** 3, 2),
+            "total_gb": round(usage.total / 1024 ** 3, 2),
+        })
+
     return app

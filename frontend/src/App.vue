@@ -18,12 +18,14 @@
     </div>
   </nav>
   <router-view />
+  <footer v-if="disk" class="stonies-footer">{{ disk.free_gb }} GB free of {{ disk.total_gb }} GB</footer>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 
 const nfcStatus = ref({})
+const disk = ref(null)
 let pollTimer = null
 
 async function poll() {
@@ -32,6 +34,13 @@ async function poll() {
     nfcStatus.value = await res.json()
   } catch (_) {}
   pollTimer = setTimeout(poll, nfcStatus.value.sleep_stops_at ? 10000 : 30000)
+}
+
+async function fetchDisk() {
+  try {
+    const res = await fetch('/api/disk')
+    disk.value = await res.json()
+  } catch (_) {}
 }
 
 const nfcLabel = computed(() => {
@@ -49,7 +58,7 @@ const nfcClass = computed(() => {
   return 'is-ok'
 })
 
-onMounted(() => poll())
+onMounted(() => { poll(); fetchDisk() })
 onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer) })
 </script>
 
@@ -134,5 +143,12 @@ onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer) })
 /* Hide NFC text on very small screens to keep nav single-line */
 @media (max-width: 400px) {
   .nfc-indicator { display: none; }
+}
+
+.stonies-footer {
+  text-align: center;
+  padding: 0.75rem;
+  font-size: 0.72rem;
+  color: #888;
 }
 </style>
