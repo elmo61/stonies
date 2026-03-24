@@ -1,10 +1,10 @@
 <template>
   <div id="app">
 
-    <div class="container" style="max-width: 860px; padding-top: 1.25rem;">
+    <div class="container" style="max-width: 860px; padding-top: 1.25rem;" :class="{ 'has-local-player': localPlayRequest }">
 
-      <!-- Now playing (sticky) -->
-      <div v-if="playbackStatus.playing" class="now-playing-bar">
+      <!-- Chromecast now-playing (kept in-flow when casting) -->
+      <div v-if="playbackStatus.playing && !localPlayRequest" class="now-playing-bar">
         <span style="color: white;">
           <span>▶</span>
           <strong class="ml-2" style="color: white;">{{ playbackStatus.song_name || 'Unknown' }}</strong>
@@ -17,20 +17,6 @@
           </span>
         </span>
         <button class="button is-danger is-small" :class="{'is-loading': stopping}" @click="stopPlayback">■ Stop</button>
-      </div>
-
-      <!-- Local playback now-playing bar -->
-      <div v-if="localPlaying" class="now-playing-bar" style="background: #363636;">
-        <span style="color: white;">
-          <span>▶</span>
-          <strong class="ml-2" style="color: white;">{{ localSongName }}</strong>
-          <span v-if="localChapterIndex !== null" class="ml-2" style="color: rgba(255,255,255,0.75); font-size:0.88rem;">
-            Ch {{ localChapterIndex + 1 }}<span v-if="localCurrentTime"> · {{ formatTime(localCurrentTime) }}</span>
-          </span>
-          <span v-else-if="localCurrentTime" class="ml-2" style="color: rgba(255,255,255,0.75); font-size:0.88rem;">· {{ formatTime(localCurrentTime) }}</span>
-          <span class="tag is-light is-small ml-2">📱 This device</span>
-        </span>
-        <button class="button is-danger is-small" @click="stopLocalAudio">■ Stop</button>
       </div>
 
       <!-- Offline mode toggle -->
@@ -557,11 +543,19 @@
     </div>
   </div>
 
+  <!-- Fixed bottom player bar (local on-device playback) -->
+  <LocalPlayerBar
+    v-if="localPlayRequest"
+    :play-request="localPlayRequest"
+    @stopped="localPlayRequest = null"
+  />
+
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import LocalPlayerBar from '../components/LocalPlayerBar.vue'
 
 const API = `http://${window.location.hostname}:5000/api`
 const BASE = `http://${window.location.hostname}:5000`
@@ -1133,84 +1127,15 @@ async function clearProgress(song) {
 }
 
 // --- Local (browser) audio playback ---
-let localAudio = null
-let localChapters = null
-const localPlaying = ref(false)
-const localSongId = ref(null)
-const localSongName = ref('')
-const localChapterIndex = ref(null)
-const localCurrentTime = ref(0)
-
-function stopLocalAudio() {
-  if (localAudio) {
-    localAudio.pause()
-    localAudio.src = ''
-    localAudio.onended = null
-    localAudio.ontimeupdate = null
-    localAudio.onloadedmetadata = null
-    localAudio.onerror = null
-    localAudio = null
-  }
-  localPlaying.value = false
-  localSongId.value = null
-  localSongName.value = ''
-  localChapterIndex.value = null
-  localCurrentTime.value = 0
-  localChapters = null
-}
-
-function _startLocalAudio(url, songId, songName, chapterIdx, startTime = 0) {
-  stopLocalAudio()
-  localAudio = new Audio(url)
-  localSongId.value = songId
-  localSongName.value = songName
-  localChapterIndex.value = chapterIdx
-  localCurrentTime.value = 0
-
-  if (startTime > 0) {
-    localAudio.onloadedmetadata = () => { if (localAudio) localAudio.currentTime = startTime }
-  }
-  localAudio.ontimeupdate = () => { if (localAudio) localCurrentTime.value = localAudio.currentTime }
-  localAudio.onended = () => {
-    if (localChapters && localChapterIndex.value !== null) {
-      const next = localChapterIndex.value + 1
-      if (next < localChapters.length) {
-        const song = songs.value.find(s => s.id === localSongId.value)
-        if (song) {
-          const ch = localChapters[next]
-          const nextUrl = `${BASE}/music/${encodeURIComponent(song.folder)}/${encodeURIComponent(ch.filename)}`
-          _startLocalAudio(nextUrl, song.id, song.name, next)
-          return
-        }
-      }
-    }
-    stopLocalAudio()
-  }
-  localAudio.onerror = () => stopLocalAudio()
-  localAudio.play().then(() => { localPlaying.value = true }).catch(() => stopLocalAudio())
-}
+const localPlayRequest = ref(null)
 
 function playLocal(song) {
-  if (song.type === 'audiobook') {
-    const prog = song.progress || {}
-    const chIdx = prog.chapter_index || 0
-    const startTime = prog.current_time || 0
-    localChapters = song.chapters
-    const ch = song.chapters[chIdx]
-    const url = `${BASE}/music/${encodeURIComponent(song.folder)}/${encodeURIComponent(ch.filename)}`
-    _startLocalAudio(url, song.id, song.name, chIdx, startTime)
-  } else {
-    localChapters = null
-    const url = `${BASE}/music/${encodeURIComponent(song.filename)}`
-    _startLocalAudio(url, song.id, song.name, null)
-  }
+  const prog = song.progress || {}
+  localPlayRequest.value = { song, chapter: prog.chapter_index ?? 0, time: prog.current_time ?? 0 }
 }
 
 function playLocalChapter(song, chapterIndex) {
-  localChapters = song.chapters
-  const ch = song.chapters[chapterIndex]
-  const url = `${BASE}/music/${encodeURIComponent(song.folder)}/${encodeURIComponent(ch.filename)}`
-  _startLocalAudio(url, song.id, song.name, chapterIndex)
+  localPlayRequest.value = { song, chapter: chapterIndex, time: 0 }
 }
 
 // --- Device sync ---
@@ -1300,7 +1225,6 @@ onMounted(async () => {
 
 onUnmounted(() => {
   stopNfcPoll()
-  stopLocalAudio()
   if (bgPollTimer) clearInterval(bgPollTimer)
   if (playbackPollTimer) { clearTimeout(playbackPollTimer); playbackPollTimer = null }
   if (syncPollTimer) { clearTimeout(syncPollTimer); syncPollTimer = null }
