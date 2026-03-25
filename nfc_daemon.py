@@ -1,8 +1,19 @@
+import ctypes
+import ctypes.util
 import json
 import socket
 import time
 import threading
 from datetime import datetime
+
+
+def _set_thread_name(name):
+    """Set the OS-level thread name (visible in top -H). Max 15 chars on Linux."""
+    try:
+        libc = ctypes.CDLL(ctypes.util.find_library('c'), use_errno=True)
+        libc.prctl(15, name[:15].encode(), 0, 0, 0)
+    except Exception:
+        pass
 
 
 def get_ip():
@@ -482,6 +493,7 @@ def check_and_schedule_sleep(state, config_path, config_lock, pi_ip, log_path=No
 def run_position_tracker(state, songs_path, songs_lock, config_path, config_lock):
     """Background thread: polls Chromecast every 5 minutes as a fallback position save.
     The cast_monitor handles most position updates via push events; this is a safety net."""
+    _set_thread_name("pos-tracker")
     import pychromecast
     from urllib.parse import unquote, urlparse
     import time as _time
@@ -603,6 +615,7 @@ def run_position_tracker(state, songs_path, songs_lock, config_path, config_lock
 
 def run_daemon(state, songs_path, songs_lock, config_path, config_lock, pi_ip, log_path=None):
     """Background NFC loop. Owns the PN532 exclusively."""
+    _set_thread_name("nfc-daemon")
     from activity_log import write_log
 
     try:

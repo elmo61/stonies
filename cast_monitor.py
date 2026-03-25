@@ -55,6 +55,12 @@ class CastMonitor:
     # ------------------------------------------------------------------
 
     def _run(self):
+        try:
+            import ctypes, ctypes.util
+            libc = ctypes.CDLL(ctypes.util.find_library('c'), use_errno=True)
+            libc.prctl(15, b"cast-monitor", 0, 0, 0)
+        except Exception:
+            pass
         backoff = 15
         while True:
             try:
