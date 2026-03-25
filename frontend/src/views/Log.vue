@@ -50,18 +50,12 @@ const debugLines = ref([])
 const debugOpen = ref(false)
 
 onMounted(async () => {
-  try {
-    const [logRes, nfcRes] = await Promise.all([
-      fetch('/api/log'),
-      fetch('/api/nfc/status'),
-    ])
-    const logData = await logRes.json()
-    const nfcData = await nfcRes.json()
-    lines.value = logData.lines || []
-    debugLines.value = (nfcData.log || []).slice().reverse() // newest first
-  } catch (e) {
-    console.error('Failed to load log', e)
-  }
+  const [logResult, nfcResult] = await Promise.allSettled([
+    fetch('/api/log').then(r => r.json()),
+    fetch('/api/nfc/status').then(r => r.json()),
+  ])
+  if (logResult.status === 'fulfilled') lines.value = logResult.value.lines || []
+  if (nfcResult.status === 'fulfilled') debugLines.value = (nfcResult.value.log || []).slice().reverse()
 })
 </script>
 

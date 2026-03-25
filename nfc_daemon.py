@@ -17,6 +17,18 @@ def get_ip():
         s.close()
 
 
+def _resolve_cast_ip(fallback_ip, log_fn=None):
+    """Resolve the current LAN IP, falling back to fallback_ip with a warning if unavailable."""
+    ip = get_ip()
+    if ip == "127.0.0.1":
+        msg = f"WARNING: could not resolve LAN IP, falling back to {fallback_ip}"
+        print(f"[Cast] {msg}")
+        if log_fn:
+            log_fn(msg)
+        return fallback_ip
+    return ip
+
+
 class NFCState:
     """Thread-safe shared state between the NFC daemon and Flask threads."""
 
@@ -251,15 +263,7 @@ def cast_audiobook(song, config_path, config_lock, pi_ip, start_index=0, start_t
     import pychromecast
     from urllib.parse import quote
 
-    # Re-resolve IP at cast time — startup value may be stale or 127.0.0.1 if WiFi was slow
-    resolved_ip = get_ip()
-    if resolved_ip == "127.0.0.1":
-        msg = f"WARNING: could not resolve LAN IP, falling back to {pi_ip}"
-        print(f"[Cast] {msg}")
-        if log_fn:
-            log_fn(msg)
-    else:
-        pi_ip = resolved_ip
+    pi_ip = _resolve_cast_ip(pi_ip, log_fn)
 
     with config_lock:
         try:
@@ -346,15 +350,7 @@ def cast_song(song, config_path, config_lock, pi_ip, log_fn=None):
     import pychromecast
     from urllib.parse import quote
 
-    # Re-resolve IP at cast time — startup value may be stale or 127.0.0.1 if WiFi was slow
-    resolved_ip = get_ip()
-    if resolved_ip == "127.0.0.1":
-        msg = f"WARNING: could not resolve LAN IP, falling back to {pi_ip}"
-        print(f"[Cast] {msg}")
-        if log_fn:
-            log_fn(msg)
-    else:
-        pi_ip = resolved_ip
+    pi_ip = _resolve_cast_ip(pi_ip, log_fn)
 
     with config_lock:
         try:
