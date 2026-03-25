@@ -9,17 +9,6 @@
   </section>
   <section class="section">
     <div class="container">
-      <div class="box">
-        <p class="has-text-grey" v-if="!lines.length">No log entries yet.</p>
-        <table class="table is-fullwidth is-striped is-size-7" v-else>
-          <tbody>
-            <tr v-for="(line, i) in lines" :key="i">
-              <td style="white-space: pre-wrap; font-family: monospace;">{{ line }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
       <!-- Debug log (collapsible) -->
       <div class="box">
         <div class="debug-toggle" @click="debugOpen = !debugOpen">
@@ -37,6 +26,17 @@
             </tbody>
           </table>
         </div>
+      </div>
+
+      <div class="box">
+        <p class="has-text-grey" v-if="!lines.length">No log entries yet.</p>
+        <table class="table is-fullwidth is-striped is-size-7" v-else>
+          <tbody>
+            <tr v-for="(line, i) in lines" :key="i">
+              <td style="white-space: pre-wrap; font-family: monospace;">{{ line }}</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
   </section>
