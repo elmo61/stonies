@@ -83,36 +83,29 @@ class CastMonitor:
         except Exception:
             pass
         while True:
-            # Wait until on_play() signals us; idle when nothing is casting.
+            # Block until on_play() fires; clear immediately so the loop
+            # only runs once per signal, never spins.
             self._play_event.wait()
+            self._play_event.clear()
 
             try:
                 speaker = self._pending_speaker
                 if not speaker:
-                    self._play_event.clear()
                     continue
 
+                # Disconnect first if the speaker has changed.
                 if self._connected_speaker != speaker:
                     self._disconnect()
 
+                # Connect if we don't have a live connection yet.
+                # If still connected from the previous play (same speaker),
+                # the existing socket is reused — no reconnect needed.
                 if self._cast is None:
                     self._connect(speaker)
-                    if self._cast is None:
-                        self._play_event.clear()
-                        time.sleep(15)
-                        continue
-
-                # Connected — pychromecast delivers callbacks on its own thread.
-                # Sleep briefly, then check whether a callback has signalled us
-                # to disconnect (event cleared) and do so from this thread.
-                time.sleep(5)
-                if not self._play_event.is_set() and self._cast is not None:
-                    self._disconnect()
 
             except Exception as e:
                 print(f"[Monitor] Unexpected error: {e}")
                 self._disconnect()
-                self._play_event.clear()
 
     # ------------------------------------------------------------------
     # Connection management
@@ -172,7 +165,6 @@ class CastMonitor:
         self._cast = None
         self._connected_speaker = None
         self._last_player_state = None
-        self._play_event.clear()
 
     # ------------------------------------------------------------------
     # Media status callback (runs on pychromecast socket thread)
@@ -211,15 +203,11 @@ class CastMonitor:
                     if song and song.get("type") == "audiobook":
                         # Clear saved progress so next play starts from the beginning
                         self._clear_progress(song_id)
-                    # Signal _run() to disconnect (safe: runs on pychromecast thread,
-                    # actual cast.disconnect() happens on the cast-monitor thread)
-                    self._play_event.clear()
 
             elif idle_reason in ("CANCELLED", "INTERRUPTED"):
                 if prev_state in ("PLAYING", "PAUSED", "BUFFERING"):
                     write_log(self._log_path, f'"{song_name}" stopped')
                     self._state.set_playing(False)
-                    self._play_event.clear()
 
         # Throttled position save for audiobooks while playing/paused
         if (player_state in ("PLAYING", "PAUSED")
