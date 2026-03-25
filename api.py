@@ -212,7 +212,7 @@ def run_sync(peer_hostname, pi_ip, songs_path, songs_lock, music_folder,
 def create_app(state, songs_lock, config_lock, music_folder, import_folder, images_folder, songs_path, config_path, pi_ip, log_path=None):
     base_dir = os.path.dirname(os.path.abspath(__file__))
     dist_dir = os.path.join(base_dir, "frontend", "dist")
-    app = Flask(__name__, static_folder=dist_dir, static_url_path="")
+    app = Flask(__name__)
     CORS(app)
 
     # ------------------------------------------------------------------
