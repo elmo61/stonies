@@ -1,7 +1,7 @@
 import os
 import threading
 
-from nfc_daemon import NFCState, run_daemon, run_position_tracker, get_ip
+from nfc_daemon import NFCState, run_daemon, get_ip
 from cast_monitor import CastMonitor
 from api import create_app
 
@@ -32,13 +32,6 @@ if __name__ == "__main__":
         daemon=True,
     )
     daemon_thread.start()
-
-    tracker_thread = threading.Thread(
-        target=run_position_tracker,
-        args=(state, songs_path, songs_lock, config_path, config_lock),
-        daemon=True,
-    )
-    tracker_thread.start()
 
     monitor = CastMonitor(state, songs_path, songs_lock, config_path, config_lock, log_path)
     monitor.start()
