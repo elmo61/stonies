@@ -1,15 +1,15 @@
 """
-Persistent Chromecast media status listener.
+On-demand Chromecast media status listener.
 
-Runs as a background daemon thread. Maintains a long-lived connection to the
-configured speaker so we receive push notifications for PLAYING / PAUSED /
-FINISHED events instead of polling.
+Runs as a background daemon thread. Connects to the speaker only when a cast
+starts (via on_play()) and disconnects when playback ends. Receives push
+notifications from the Chromecast while connected — no polling.
 
 Responsibilities:
   - Log "finished" and "stopped" events to activity.log
   - Save audiobook position every 30 s during playback (push-driven)
   - Detect end-of-audiobook (last chapter FINISHED) and clear saved progress
-  - Update NFCState when playback ends unexpectedly
+  - Update NFCState when playback ends (naturally, cancelled, or speaker lost)
 """
 import json
 import time
@@ -31,6 +31,20 @@ class _MediaListener:
             print(f"[Monitor] Callback error: {e}")
 
 
+class _ConnectionListener:
+    """Notifies CastMonitor when the socket to the speaker drops unexpectedly."""
+
+    def __init__(self, on_lost):
+        self._on_lost = on_lost
+
+    def new_connection_status(self, status):
+        if getattr(status, "status", None) in ("DISCONNECTED", "FAILED", "LOST"):
+            try:
+                self._on_lost()
+            except Exception:
+                pass
+
+
 class CastMonitor:
 
     def __init__(self, state, songs_path, songs_lock,
@@ -45,10 +59,17 @@ class CastMonitor:
         self._connected_speaker = None
         self._last_player_state = None
         self._last_position_save = 0
+        self._play_event = threading.Event()
+        self._pending_speaker = ""
 
     def start(self):
         t = threading.Thread(target=self._run, daemon=True, name="cast-monitor")
         t.start()
+
+    def on_play(self):
+        """Signal that a cast has just started. Called from nfc_daemon or api."""
+        self._pending_speaker = self._get_speaker()
+        self._play_event.set()
 
     # ------------------------------------------------------------------
     # Main loop
@@ -61,37 +82,37 @@ class CastMonitor:
             libc.prctl(15, b"cast-monitor", 0, 0, 0)
         except Exception:
             pass
-        backoff = 15
         while True:
+            # Wait until on_play() signals us; idle when nothing is casting.
+            self._play_event.wait()
+
             try:
-                speaker = self._get_speaker()
+                speaker = self._pending_speaker
                 if not speaker:
-                    time.sleep(30)
+                    self._play_event.clear()
                     continue
 
-                # Reconnect if speaker changed
                 if self._connected_speaker != speaker:
                     self._disconnect()
 
                 if self._cast is None:
                     self._connect(speaker)
                     if self._cast is None:
-                        time.sleep(backoff)
-                        backoff = min(backoff * 2, 120)
+                        self._play_event.clear()
+                        time.sleep(15)
                         continue
-                    backoff = 15  # reset on success
 
-                # Connection established — pychromecast manages the socket
-                # and delivers callbacks on its own background thread.
-                # Sleep and let it do its thing; we only reconnect on exception
-                # or if the speaker config changes.
-                time.sleep(60)
+                # Connected — pychromecast delivers callbacks on its own thread.
+                # Sleep briefly, then check whether a callback has signalled us
+                # to disconnect (event cleared) and do so from this thread.
+                time.sleep(5)
+                if not self._play_event.is_set() and self._cast is not None:
+                    self._disconnect()
 
             except Exception as e:
                 print(f"[Monitor] Unexpected error: {e}")
                 self._disconnect()
-                time.sleep(backoff)
-                backoff = min(backoff * 2, 120)
+                self._play_event.clear()
 
     # ------------------------------------------------------------------
     # Connection management
@@ -123,6 +144,9 @@ class CastMonitor:
             cast.media_controller.register_status_listener(
                 _MediaListener(self._on_media_status)
             )
+            cast.register_connection_listener(
+                _ConnectionListener(self._on_connection_lost)
+            )
             self._cast = cast
             self._connected_speaker = speaker_name
             print(f"[Monitor] Connected to '{speaker_name}'")
@@ -139,6 +163,16 @@ class CastMonitor:
                 cast.disconnect()
             except Exception:
                 pass
+
+    def _on_connection_lost(self):
+        """Called by _ConnectionListener when the socket to the speaker drops."""
+        print("[Monitor] Speaker connection lost unexpectedly")
+        self._state.set_playing(False)
+        # Clear the cast ref without calling disconnect (socket already gone)
+        self._cast = None
+        self._connected_speaker = None
+        self._last_player_state = None
+        self._play_event.clear()
 
     # ------------------------------------------------------------------
     # Media status callback (runs on pychromecast socket thread)
@@ -177,11 +211,15 @@ class CastMonitor:
                     if song and song.get("type") == "audiobook":
                         # Clear saved progress so next play starts from the beginning
                         self._clear_progress(song_id)
+                    # Signal _run() to disconnect (safe: runs on pychromecast thread,
+                    # actual cast.disconnect() happens on the cast-monitor thread)
+                    self._play_event.clear()
 
             elif idle_reason in ("CANCELLED", "INTERRUPTED"):
                 if prev_state in ("PLAYING", "PAUSED", "BUFFERING"):
                     write_log(self._log_path, f'"{song_name}" stopped')
                     self._state.set_playing(False)
+                    self._play_event.clear()
 
         # Throttled position save for audiobooks while playing/paused
         if (player_state in ("PLAYING", "PAUSED")

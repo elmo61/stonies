@@ -26,16 +26,17 @@ if __name__ == "__main__":
     songs_lock = threading.Lock()
     config_lock = threading.Lock()
 
+    monitor = CastMonitor(state, songs_path, songs_lock, config_path, config_lock, log_path)
+    monitor.start()
+
     daemon_thread = threading.Thread(
         target=run_daemon,
         args=(state, songs_path, songs_lock, config_path, config_lock, pi_ip, log_path),
+        kwargs={"monitor": monitor},
         daemon=True,
     )
     daemon_thread.start()
 
-    monitor = CastMonitor(state, songs_path, songs_lock, config_path, config_lock, log_path)
-    monitor.start()
-
-    app = create_app(state, songs_lock, config_lock, music_folder, import_folder, images_folder, songs_path, config_path, pi_ip, log_path)
+    app = create_app(state, songs_lock, config_lock, music_folder, import_folder, images_folder, songs_path, config_path, pi_ip, log_path, monitor=monitor)
     print(f"[Main] Starting Flask on http://{pi_ip}:5000")
     app.run(host="0.0.0.0", port=5000, threaded=True)

@@ -209,7 +209,7 @@ def run_sync(peer_hostname, pi_ip, songs_path, songs_lock, music_folder,
         update(status="error", current="", errors=[str(e)])
 
 
-def create_app(state, songs_lock, config_lock, music_folder, import_folder, images_folder, songs_path, config_path, pi_ip, log_path=None):
+def create_app(state, songs_lock, config_lock, music_folder, import_folder, images_folder, songs_path, config_path, pi_ip, log_path=None, monitor=None):
     base_dir = os.path.dirname(os.path.abspath(__file__))
     dist_dir = os.path.join(base_dir, "frontend", "dist")
     app = Flask(__name__)
@@ -818,6 +818,8 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
             else:
                 cast_song(song, config_path, config_lock, pi_ip, log_fn=state.add_log)
                 state.set_now_playing(song_id)
+            if monitor:
+                monitor.on_play()
             update_play_stats(song_id, songs_path, songs_lock)
             state.add_log(f"Now playing \"{song['name']}\"")
             if log_path:

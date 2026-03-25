@@ -613,7 +613,7 @@ def run_position_tracker(state, songs_path, songs_lock, config_path, config_lock
 # Daemon loop
 # ---------------------------------------------------------------------------
 
-def run_daemon(state, songs_path, songs_lock, config_path, config_lock, pi_ip, log_path=None):
+def run_daemon(state, songs_path, songs_lock, config_path, config_lock, pi_ip, log_path=None, monitor=None):
     """Background NFC loop. Owns the PN532 exclusively."""
     _set_thread_name("nfc-daemon")
     from activity_log import write_log
@@ -685,6 +685,8 @@ def run_daemon(state, songs_path, songs_lock, config_path, config_lock, pi_ip, l
                                             cast_song(s, config_path, config_lock, pi_ip,
                                                       log_fn=state.add_log)
                                             state.set_now_playing(s["id"])
+                                        if monitor:
+                                            monitor.on_play()
                                         update_play_stats(s["id"], songs_path, songs_lock)
                                         print(f"[NFC] Now playing '{s['name']}'")
                                         state.add_log(f"Now playing \"{s['name']}\"")
