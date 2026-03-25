@@ -812,10 +812,11 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
                     start_index = prog.get("chapter_index", 0)
                     start_time = prog.get("current_time", 0)
                 cast_audiobook(song, config_path, config_lock, pi_ip,
-                               start_index=start_index, start_time=start_time)
+                               start_index=start_index, start_time=start_time,
+                               log_fn=state.add_log)
                 state.set_now_playing(song_id, chapter_index=start_index)
             else:
-                cast_song(song, config_path, config_lock, pi_ip)
+                cast_song(song, config_path, config_lock, pi_ip, log_fn=state.add_log)
                 state.set_now_playing(song_id)
             update_play_stats(song_id, songs_path, songs_lock)
             state.add_log(f"Now playing \"{song['name']}\"")

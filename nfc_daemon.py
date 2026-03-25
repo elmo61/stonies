@@ -1,7 +1,20 @@
 import json
+import socket
 import time
 import threading
 from datetime import datetime
+
+
+def get_ip():
+    """Resolve the Pi's current LAN IP. Called fresh at cast time to avoid stale IPs."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))
+        return s.getsockname()[0]
+    except Exception:
+        return "127.0.0.1"
+    finally:
+        s.close()
 
 
 class NFCState:
@@ -233,10 +246,20 @@ def update_play_stats(song_id, songs_path, songs_lock):
             pass
 
 
-def cast_audiobook(song, config_path, config_lock, pi_ip, start_index=0, start_time=0):
+def cast_audiobook(song, config_path, config_lock, pi_ip, start_index=0, start_time=0, log_fn=None):
     """Queue all chapters of an audiobook on the configured speaker. Raises on any failure."""
     import pychromecast
     from urllib.parse import quote
+
+    # Re-resolve IP at cast time — startup value may be stale or 127.0.0.1 if WiFi was slow
+    resolved_ip = get_ip()
+    if resolved_ip == "127.0.0.1":
+        msg = f"WARNING: could not resolve LAN IP, falling back to {pi_ip}"
+        print(f"[Cast] {msg}")
+        if log_fn:
+            log_fn(msg)
+    else:
+        pi_ip = resolved_ip
 
     with config_lock:
         try:
@@ -257,6 +280,11 @@ def cast_audiobook(song, config_path, config_lock, pi_ip, start_index=0, start_t
     queue_items = []
     for i, ch in enumerate(chapters):
         url = f"http://{pi_ip}:5000/music/{quote(folder)}/{quote(ch['filename'])}"
+        if i == 0:
+            msg = f"Casting audiobook from {url}"
+            print(f"[Cast] {msg}")
+            if log_fn:
+                log_fn(msg)
         filename = ch["filename"]
         ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
         mime = "audio/mp4" if ext == "m4a" else "audio/mpeg"
@@ -313,9 +341,20 @@ def cast_audiobook(song, config_path, config_lock, pi_ip, start_index=0, start_t
         cast.disconnect()
 
 
-def cast_song(song, config_path, config_lock, pi_ip):
+def cast_song(song, config_path, config_lock, pi_ip, log_fn=None):
     """Cast a song to the configured speaker. Raises on any failure."""
     import pychromecast
+    from urllib.parse import quote
+
+    # Re-resolve IP at cast time — startup value may be stale or 127.0.0.1 if WiFi was slow
+    resolved_ip = get_ip()
+    if resolved_ip == "127.0.0.1":
+        msg = f"WARNING: could not resolve LAN IP, falling back to {pi_ip}"
+        print(f"[Cast] {msg}")
+        if log_fn:
+            log_fn(msg)
+    else:
+        pi_ip = resolved_ip
 
     with config_lock:
         try:
@@ -331,7 +370,11 @@ def cast_song(song, config_path, config_lock, pi_ip):
     filename = song.get("filename", "")
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     mime = "audio/mp4" if ext == "m4a" else "audio/mpeg"
-    url = f"http://{pi_ip}:5000/music/{filename}"
+    url = f"http://{pi_ip}:5000/music/{quote(filename)}"
+    msg = f"Casting track from {url}"
+    print(f"[Cast] {msg}")
+    if log_fn:
+        log_fn(msg)
 
     chromecasts, browser = pychromecast.get_listed_chromecasts(
         friendly_names=[speaker_name]
@@ -626,10 +669,12 @@ def run_daemon(state, songs_path, songs_lock, config_path, config_lock, pi_ip, l
                                                 s, config_path, config_lock, pi_ip,
                                                 start_index=start_index,
                                                 start_time=prog.get("current_time", 0),
+                                                log_fn=state.add_log,
                                             )
                                             state.set_now_playing(s["id"], chapter_index=start_index)
                                         else:
-                                            cast_song(s, config_path, config_lock, pi_ip)
+                                            cast_song(s, config_path, config_lock, pi_ip,
+                                                      log_fn=state.add_log)
                                             state.set_now_playing(s["id"])
                                         update_play_stats(s["id"], songs_path, songs_lock)
                                         print(f"[NFC] Now playing '{s['name']}'")

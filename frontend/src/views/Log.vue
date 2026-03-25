@@ -19,6 +19,25 @@
           </tbody>
         </table>
       </div>
+
+      <!-- Debug log (collapsible) -->
+      <div class="box">
+        <div class="debug-toggle" @click="debugOpen = !debugOpen">
+          <span>Debug log</span>
+          <span class="debug-chevron" :class="{ open: debugOpen }">▶</span>
+        </div>
+        <div v-if="debugOpen" class="mt-3">
+          <p class="has-text-grey is-size-7" v-if="!debugLines.length">No debug entries.</p>
+          <table class="table is-fullwidth is-striped is-size-7" v-else>
+            <tbody>
+              <tr v-for="entry in debugLines" :key="entry.seq">
+                <td class="debug-time">{{ entry.time }}</td>
+                <td style="white-space: pre-wrap; font-family: monospace;">{{ entry.msg }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   </section>
 </template>
@@ -27,14 +46,54 @@
 import { ref, onMounted } from 'vue'
 
 const lines = ref([])
+const debugLines = ref([])
+const debugOpen = ref(false)
 
 onMounted(async () => {
   try {
-    const res = await fetch('/api/log')
-    const data = await res.json()
-    lines.value = data.lines || []
+    const [logRes, nfcRes] = await Promise.all([
+      fetch('/api/log'),
+      fetch('/api/nfc/status'),
+    ])
+    const logData = await logRes.json()
+    const nfcData = await nfcRes.json()
+    lines.value = logData.lines || []
+    debugLines.value = (nfcData.log || []).slice().reverse() // newest first
   } catch (e) {
     console.error('Failed to load log', e)
   }
 })
 </script>
+
+<style scoped>
+.debug-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: #555;
+  user-select: none;
+}
+
+.debug-toggle:hover {
+  color: #333;
+}
+
+.debug-chevron {
+  font-size: 0.7rem;
+  transition: transform 0.2s;
+}
+
+.debug-chevron.open {
+  transform: rotate(90deg);
+}
+
+.debug-time {
+  white-space: nowrap;
+  color: #888;
+  font-family: monospace;
+  padding-right: 0.75rem;
+}
+</style>
