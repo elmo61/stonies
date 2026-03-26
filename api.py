@@ -350,7 +350,7 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
                 image_file.save(os.path.join(images_folder, img_filename))
                 image_url = f"http://{pi_ip}:5000/images/{img_filename}"
 
-        if song_type == "audiobook":
+        if song_type in ("audiobook", "album"):
             files = request.files.getlist("files[]")
             valid = [(secure_filename(f.filename), f) for f in files if f.filename]
             valid = sorted(valid, key=lambda x: x[0])

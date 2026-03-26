@@ -123,15 +123,16 @@
             <label class="label">Type</label>
             <div class="buttons has-addons">
               <button class="button is-small" :class="uploadType === 'track' ? 'is-info is-selected' : 'is-light'" @click="setUploadType('track')">🎵 Track</button>
+              <button class="button is-small" :class="uploadType === 'album' ? 'is-info is-selected' : 'is-light'" @click="setUploadType('album')">💿 Album</button>
               <button class="button is-small" :class="uploadType === 'audiobook' ? 'is-info is-selected' : 'is-light'" @click="setUploadType('audiobook')">📚 Audiobook</button>
             </div>
           </div>
 
           <!-- Name -->
           <div class="field">
-            <label class="label">{{ uploadType === 'audiobook' ? 'Audiobook Name' : 'Song Name' }}</label>
+            <label class="label">{{ uploadType === 'audiobook' ? 'Audiobook Name' : uploadType === 'album' ? 'Album Name' : 'Song Name' }}</label>
             <div class="control">
-              <input class="input" type="text" v-model="uploadName" :placeholder="uploadType === 'audiobook' ? 'e.g. Harry Potter and the Philosopher\'s Stone' : 'e.g. Mr. Blue Sky'" />
+              <input class="input" type="text" v-model="uploadName" :placeholder="uploadType === 'audiobook' ? 'e.g. Harry Potter and the Philosopher\'s Stone' : uploadType === 'album' ? 'e.g. Abbey Road' : 'e.g. Mr. Blue Sky'" />
             </div>
           </div>
 
@@ -143,9 +144,9 @@
             </div>
           </div>
 
-          <!-- AUDIOBOOK: folder or files -->
-          <div v-if="uploadType === 'audiobook'" class="field">
-            <label class="label">Chapter Files</label>
+          <!-- AUDIOBOOK / ALBUM: folder or files -->
+          <div v-if="uploadType === 'audiobook' || uploadType === 'album'" class="field">
+            <label class="label">{{ uploadType === 'album' ? 'Track Files' : 'Chapter Files' }}</label>
             <div class="mb-2">
               <button class="button is-small is-light mr-2" type="button" @click="$refs.folderPicker.click()">📁 Select Folder</button>
               <button class="button is-small is-light" type="button" @click="$refs.filesPicker.click()">📄 Select Files</button>
@@ -153,7 +154,7 @@
               <input ref="filesPicker" type="file" multiple accept=".mp3,.m4a" style="display:none" @change="onAudiobookFilesChange" />
             </div>
             <div v-if="uploadChapters.length > 0">
-              <p class="help mb-2">{{ uploadChapters.length }} chapter{{ uploadChapters.length !== 1 ? 's' : '' }} selected — edit names if needed:</p>
+              <p class="help mb-2">{{ uploadChapters.length }} {{ uploadType === 'album' ? 'track' : 'chapter' }}{{ uploadChapters.length !== 1 ? 's' : '' }} selected — edit names if needed:</p>
               <div v-for="(ch, i) in uploadChapters" :key="i" class="field has-addons mb-1">
                 <div class="control">
                   <span class="button is-small is-static">{{ i + 1 }}.</span>
@@ -193,7 +194,7 @@
         <!-- Search -->
         <div v-if="songs.length > 0" class="field mb-3">
           <div class="control has-icons-left has-icons-right">
-            <input class="input" type="text" v-model="searchQuery" placeholder="Search songs and audiobooks..." />
+            <input class="input" type="text" v-model="searchQuery" placeholder="Search songs, albums and audiobooks..." />
             <span class="icon is-left" style="pointer-events:none;">🔍</span>
             <span v-if="searchQuery" class="icon is-right" style="cursor:pointer; pointer-events:all;" @click="searchQuery = ''">✕</span>
           </div>
@@ -206,6 +207,7 @@
           <span v-for="(item, i) in scanResult.imported" :key="i">
             {{ i > 0 ? ', ' : ' ' }}
             <span v-if="item.type === 'audiobook'">📚 {{ item.name }} ({{ item.chapters }} chapters)</span>
+            <span v-else-if="item.type === 'album'">💿 {{ item.name }} ({{ item.chapters }} tracks)</span>
             <span v-else>🎵 {{ item.name }}</span>
           </span>
           <span v-if="scanResult.imported.length === 0">Nothing new found in music_import/.</span>
@@ -233,12 +235,13 @@
         <!-- Song table -->
         <table v-else-if="filteredSongs.length > 0" class="table is-fullwidth" style="border-collapse:collapse;">
           <tbody>
-            <tr v-for="song in filteredSongs" :key="song.id" class="song-row" :class="{'is-audiobook': song.type === 'audiobook'}">
+            <tr v-for="song in filteredSongs" :key="song.id" class="song-row" :class="{'is-audiobook': song.type === 'audiobook', 'is-album': song.type === 'album'}">
 
               <!-- Thumbnail -->
               <td style="width: 56px; padding-left: 0.75rem;">
                 <img v-if="song.image_url" :src="song.image_url" class="song-thumb" :alt="song.name" />
                 <div v-else-if="song.type === 'audiobook'" class="song-icon is-audiobook">📚</div>
+                <div v-else-if="song.type === 'album'" class="song-icon is-album">💿</div>
                 <div v-else class="song-icon is-track">🎵</div>
               </td>
 
@@ -249,17 +252,18 @@
                   <div style="display:flex; align-items:baseline; gap:6px; flex-wrap:wrap;">
                     <span class="song-name">{{ song.name }}</span>
                     <span v-if="song.type === 'audiobook'" class="tag is-warning is-light" style="font-size:0.68rem; height:1.4em;">Audiobook</span>
+                    <span v-if="song.type === 'album'" class="tag is-info is-light" style="font-size:0.68rem; height:1.4em;">Album</span>
                   </div>
                   <div class="song-meta">
                     {{ song.id }} · {{ formatDate(song.uploaded_at) }}
-                    <template v-if="song.type === 'audiobook'">
-                      · {{ song.chapters.length }} ch
-                      <span v-if="song.progress" class="has-text-info ml-1">· Ch {{ (song.progress.chapter_index||0)+1 }} · {{ formatTime(song.progress.current_time) }} <a @click.prevent="clearProgress(song)" href="#" style="color:#aaa;" title="Clear saved position">✕</a></span>
+                    <template v-if="song.type === 'audiobook' || song.type === 'album'">
+                      · {{ song.chapters.length }} {{ song.type === 'album' ? 'tracks' : 'ch' }}
+                      <span v-if="song.progress" class="has-text-info ml-1">· {{ song.type === 'album' ? 'Track' : 'Ch' }} {{ (song.progress.chapter_index||0)+1 }} · {{ formatTime(song.progress.current_time) }} <a @click.prevent="clearProgress(song)" href="#" style="color:#aaa;" title="Clear saved position">✕</a></span>
                       <a class="ml-1" @click.prevent="toggleChapters(song.id)" href="#" style="color:#aaa;">[{{ expandedId === song.id ? 'hide' : 'show' }}]</a>
                     </template>
                     <template v-else>· {{ song.filename }}</template>
                   </div>
-                  <ul v-if="song.type === 'audiobook' && expandedId === song.id" class="chapter-list mt-2">
+                  <ul v-if="(song.type === 'audiobook' || song.type === 'album') && expandedId === song.id" class="chapter-list mt-2">
                     <li v-for="(ch, i) in song.chapters" :key="ch.filename">
                       <button class="button is-light is-small py-0" style="height:1.4rem; min-width:1.8rem; font-size:0.7rem;"
                         @click="playLocalChapter(song, i)" :title="`Play chapter ${i+1} on this device`">▶</button>
@@ -301,14 +305,14 @@
                 <div class="buttons is-right">
                   <button class="button is-light is-small"
                     @click="playLocal(song)"
-                    :title="song.type === 'audiobook' && song.progress ? `Resume Ch ${(song.progress.chapter_index||0)+1} on this device` : 'Play on this device'">
+                    :title="(song.type === 'audiobook' || song.type === 'album') && song.progress ? `Resume ${song.type === 'album' ? 'Track' : 'Ch'} ${(song.progress.chapter_index||0)+1} on this device` : 'Play on this device'">
                     ▶
                   </button>
                   <button class="button is-primary is-small"
                     :class="{'is-loading': playingId === song.id}"
                     :disabled="!savedSpeaker || playingId !== null || nfcStatus.offline"
                     @click="playSong(song)"
-                    :title="nfcStatus.offline ? 'Go online to cast' : !savedSpeaker ? 'Save a speaker first' : song.type === 'audiobook' && song.progress ? `Resume Ch ${(song.progress.chapter_index||0)+1} on ${savedSpeaker}` : 'Cast to ' + savedSpeaker">
+                    :title="nfcStatus.offline ? 'Go online to cast' : !savedSpeaker ? 'Save a speaker first' : (song.type === 'audiobook' || song.type === 'album') && song.progress ? `Resume ${song.type === 'album' ? 'Track' : 'Ch'} ${(song.progress.chapter_index||0)+1} on ${savedSpeaker}` : 'Cast to ' + savedSpeaker">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true" style="vertical-align:middle;"><path d="M21 3H3c-1.1 0-2 .9-2 2v3h2V5h18v14h-7v2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM1 18v3h3c0-1.66-1.34-3-3-3zm0-4v2c2.76 0 5 2.24 5 5h2c0-3.87-3.13-7-7-7zm0-4v2c4.97 0 9 4.03 9 9h2c0-6.08-4.93-11-11-11z"/></svg>
                   </button>
                   <button class="button is-light is-small"
@@ -385,11 +389,13 @@
               <tr v-for="song in syncMissing" :key="song.id">
                 <td>
                   <span v-if="song.type === 'audiobook'">📚</span>
+                  <span v-else-if="song.type === 'album'">💿</span>
                   <span v-else>🎵</span>
                 </td>
                 <td>
                   {{ song.name }}
                   <span v-if="song.type === 'audiobook'" class="has-text-grey"> · {{ song.chapter_count }} ch</span>
+                  <span v-else-if="song.type === 'album'" class="has-text-grey"> · {{ song.chapter_count }} tracks</span>
                 </td>
               </tr>
             </tbody>
@@ -761,7 +767,7 @@ async function pollPlayback() {
     const data = await res.json()
     playbackStatus.value = data
     // Patch progress into the local songs array so display updates without reload
-    if (data.song_id && data.song_type === 'audiobook' && data.progress) {
+    if (data.song_id && (data.song_type === 'audiobook' || data.song_type === 'album') && data.progress) {
       const song = songs.value.find(s => s.id === data.song_id)
       if (song) song.progress = data.progress
     }

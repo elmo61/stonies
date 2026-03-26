@@ -551,7 +551,7 @@ def run_position_tracker(state, songs_path, songs_lock, config_path, config_lock
                             with open(songs_path, "r") as f:
                                 songs = json.load(f)
                             for s in songs:
-                                if s.get("id") == song_id and s.get("type") == "audiobook":
+                                if s.get("id") == song_id and s.get("type") in ("audiobook", "album"):
                                     s.pop("progress", None)
                                     break
                             with open(songs_path, "w") as f:
@@ -573,7 +573,7 @@ def run_position_tracker(state, songs_path, songs_lock, config_path, config_lock
                             with open(songs_path, "r") as f:
                                 songs = json.load(f)
                         for s in songs:
-                            if s.get("id") == song_id and s.get("type") == "audiobook":
+                            if s.get("id") == song_id and s.get("type") in ("audiobook", "album"):
                                 for i, ch in enumerate(s.get("chapters", [])):
                                     if ch.get("filename") == ch_file:
                                         chapter_idx = i
@@ -671,7 +671,7 @@ def run_daemon(state, songs_path, songs_lock, config_path, config_lock, pi_ip, l
                                 state.set_playing(True)
                                 def _do_cast(s=song):
                                     try:
-                                        if s.get("type") == "audiobook":
+                                        if s.get("type") in ("audiobook", "album"):
                                             prog = s.get("progress", {})
                                             start_index = prog.get("chapter_index", 0)
                                             cast_audiobook(
