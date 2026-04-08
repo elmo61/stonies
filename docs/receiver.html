@@ -2,9 +2,61 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Stonies Receiver</title>
+  <title>Stonies</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #0f0f1a;
+      font-family: 'Google Sans', sans-serif;
+      color: #fff;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* Stonies logo in the top-left corner */
+    .branding {
+      position: fixed;
+      top: 48px;
+      left: 56px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      z-index: 10;
+      opacity: 0.85;
+    }
+
+    .branding-icon {
+      font-size: 2.2rem;
+      line-height: 1;
+    }
+
+    .branding-name {
+      font-size: 1.8rem;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      color: #e0e0ff;
+    }
+
+    /* Let the cast-media-player fill the screen */
+    cast-media-player {
+      width: 100vw;
+      height: 100vh;
+      --theme-hue: 240;
+      --background-image-filter: blur(40px) brightness(0.35);
+      --progress-color: #a78bfa;
+    }
+  </style>
 </head>
 <body>
+  <div class="branding">
+    <span class="branding-icon">🪨</span>
+    <span class="branding-name">Stonies</span>
+  </div>
+
+  <cast-media-player></cast-media-player>
+
   <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
   <script>
     const context = cast.framework.CastReceiverContext.getInstance();
