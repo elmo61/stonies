@@ -176,6 +176,29 @@ config.json           Speaker + sleep timer config (gitignored)
 
 ---
 
+## Advanced configuration
+
+These settings are not exposed in the UI. Edit `config.json` directly on the Pi to change them.
+
+### Custom Cast receiver (`cast_app_id`)
+
+By default Stonies uses a registered Cast Web Receiver app (`A0D905F0`) which sends frequent position updates during audiobook playback. You can override this in `config.json`:
+
+```json
+{
+  "speaker": "My Speaker",
+  "cast_app_id": "A0D905F0"
+}
+```
+
+| Value | Behaviour |
+|---|---|
+| `"A0D905F0"` | Default — uses the Stonies Cast receiver (recommended) |
+| `"YOUR_APP_ID"` | Use your own registered Cast receiver app |
+| `null` | Fall back to the Default Media Receiver (no continuous position tracking) |
+
+---
+
 ## Notes
 
 - The app starts cleanly even if the PN532 is not connected — the NFC daemon exits gracefully and Flask serves the UI normally. Useful for testing on a dev machine.

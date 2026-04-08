@@ -286,6 +286,7 @@ def cast_audiobook(song, config_path, config_lock, pi_ip, start_index=0, start_t
     speaker_name = config.get("speaker", "").strip()
     if not speaker_name:
         raise RuntimeError("No speaker configured")
+    cast_app_id = config.get("cast_app_id", "A0D905F0") or None
 
     folder = song.get("folder", "")
     chapters = song.get("chapters", [])
@@ -341,6 +342,10 @@ def cast_audiobook(song, config_path, config_lock, pi_ip, start_index=0, start_t
         if mc.status and mc.status.player_state not in (None, "IDLE", "UNKNOWN"):
             mc.stop()
             time.sleep(1)
+        if cast_app_id and getattr(cast.status, "app_id", None) != cast_app_id:
+            cast.start_app(cast_app_id)
+            time.sleep(2)
+            mc = cast.media_controller
         mc.send_message(
             {
                 "type": "QUEUE_LOAD",
@@ -373,6 +378,7 @@ def cast_song(song, config_path, config_lock, pi_ip, log_fn=None):
     speaker_name = config.get("speaker", "").strip()
     if not speaker_name:
         raise RuntimeError("No speaker configured")
+    cast_app_id = config.get("cast_app_id", "A0D905F0") or None
 
     filename = song.get("filename", "")
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
@@ -400,11 +406,10 @@ def cast_song(song, config_path, config_lock, pi_ip, log_fn=None):
         if mc.status and mc.status.player_state not in (None, "IDLE", "UNKNOWN"):
             mc.stop()
             time.sleep(1)
-        mc.play_media(
-            url, mime,
-            title=song.get("name", ""),
-            thumb=song.get("image_url") or None,
-        )
+        kwargs = {"title": song.get("name", ""), "thumb": song.get("image_url") or None}
+        if cast_app_id:
+            kwargs["app_id"] = cast_app_id
+        mc.play_media(url, mime, **kwargs)
         mc.block_until_active(timeout=10)
     finally:
         cast.disconnect()
