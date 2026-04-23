@@ -9,7 +9,10 @@ Tested on Raspberry Pi OS Lite (armv7l, Python 3.11+).
 Run this single command on a fresh Pi:
 
 ```bash
-git clone https://github.com/elmo61/stonies.git && bash stonies/projects/stonies/setup.sh
+sudo apt update
+sudo apt install git -y
+
+git clone https://github.com/elmo61/stonies.git && bash stonies/setup.sh
 ```
 
 The script will:
