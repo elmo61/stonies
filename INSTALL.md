@@ -5,13 +5,15 @@ Tested on Raspberry Pi OS Lite (armv7l, Python 3.11+).
 ---
 
 ## Option A — Automatic (recommended)
-
-Run this single command on a fresh Pi:
-
+Ensure you have git installed 
 ```bash
 sudo apt update
 sudo apt install git -y
+```
 
+Then run this single command on a fresh Pi to install the stonies
+
+```bash
 git clone https://github.com/elmo61/stonies.git && bash stonies/setup.sh
 ```
 
