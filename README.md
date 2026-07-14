@@ -112,6 +112,19 @@ bash update.sh
 
 `update.sh` does everything the button does plus the service file refresh. It only touches what actually differs, so it's safe to run repeatedly. Either way, your library (`music/`, `songs.json`, `config.json`) is never affected.
 
+### Release channels
+
+Settings → **🧪 Release Channel** picks which releases the device follows:
+
+| Channel | Git branch | Who it's for |
+|---|---|---|
+| **Stable** (default) | `main` | Everyday devices — tested releases only |
+| **Beta** | `beta` | Try new features first; may be rough |
+
+Switching channel is itself just an update: pick the channel, and if that channel's version differs from what's running, the **⬆️ Update now** button appears — including when moving *back* from beta to stable (a safe downgrade; your library is untouched). `update.sh` follows the same channel setting.
+
+**Release workflow (for maintainers):** merge feature branches into `beta`; beta devices pick them up. When beta has proven itself, merge `beta` into `main` and stable devices see the update. Optionally tag main releases (`git tag v1.x && git push --tags`) as human-readable markers — devices don't use tags.
+
 ---
 
 ## Usage
@@ -198,8 +211,8 @@ config.json           Speaker + sleep timer config (gitignored)
 | POST | `/api/sync/pull` | Pull missing songs from a peer device |
 | GET | `/api/sync/status` | Sync job progress |
 | GET | `/api/disk` | Disk usage of the music folder |
-| GET | `/api/update/status` | Check for available git updates + whether they can be self-applied |
-| POST | `/api/update/apply` | Self-update: pull, install deps, restart (409 if the update needs `update.sh`) |
+| GET | `/api/update/status` | Update check for the configured channel: availability, version, self-apply eligibility |
+| POST | `/api/update/apply` | Self-update to the channel's branch: sync, install deps, restart (409 if it needs `update.sh`) |
 
 ---
 

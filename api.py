@@ -21,6 +21,9 @@ from storage import save_json
 
 AUDIO_EXTS = (".mp3", ".m4a")
 
+# Release channels: which git branch each channel follows
+CHANNEL_BRANCHES = {"stable": "main", "beta": "beta"}
+
 
 def derive_track_name(filename):
     """Derive a display name from an audio filename."""
@@ -83,21 +86,21 @@ def scan_audiobooks(music_folder, existing_songs):
     return new_entries
 
 
-def check_self_update(base_dir):
-    """Return (can_self_update, reason) for the pending update.
+def check_self_update(base_dir, branch="main"):
+    """Return (can_self_update, reason) for the pending update on branch.
 
     The web process can update code and venv packages itself (it owns those
     files), but it can't rewrite the systemd unit in /etc/systemd/system —
-    that needs sudo. Render origin/main's stonies.service the same way
-    update.sh does and compare it with the installed unit: if they differ,
-    the update must be applied with update.sh instead.
+    that needs sudo. Render the incoming branch's stonies.service the same
+    way update.sh does and compare it with the installed unit: if they
+    differ, the update must be applied with update.sh instead.
     """
     import getpass
     import subprocess
 
     try:
         show = subprocess.run(
-            ["git", "show", "origin/main:stonies.service"],
+            ["git", "show", f"origin/{branch}:stonies.service"],
             cwd=base_dir, capture_output=True, text=True, timeout=10,
         )
         if show.returncode != 0:
@@ -347,8 +350,11 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
         body = request.get_json(silent=True) or {}
         speaker = body.get("speaker", "").strip()
         sleep_timer = body.get("sleep_timer")
-        if not speaker and sleep_timer is None:
+        update_channel = body.get("update_channel")
+        if not speaker and sleep_timer is None and update_channel is None:
             return jsonify({"error": "Nothing to save"}), 400
+        if update_channel is not None and update_channel not in CHANNEL_BRANCHES:
+            return jsonify({"error": "update_channel must be 'stable' or 'beta'"}), 400
         with config_lock:
             try:
                 with open(config_path, "r") as f:
@@ -359,9 +365,12 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
                 existing["speaker"] = speaker
             if sleep_timer is not None:
                 existing["sleep_timer"] = sleep_timer
+            if update_channel is not None:
+                existing["update_channel"] = update_channel
             save_json(config_path, existing)
         return jsonify({"ok": True, "speaker": existing.get("speaker", ""),
-                        "sleep_timer": existing.get("sleep_timer")})
+                        "sleep_timer": existing.get("sleep_timer"),
+                        "update_channel": existing.get("update_channel")})
 
     # ------------------------------------------------------------------
     # Songs
@@ -552,20 +561,64 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
     # Update / deploy
     # ------------------------------------------------------------------
 
+    def _current_channel():
+        """Effective release channel: config value if set, else auto-detected
+        from the checked-out branch — a device deployed straight onto the
+        beta branch must not default to stable and offer itself a downgrade."""
+        import subprocess
+        with config_lock:
+            try:
+                with open(config_path, "r") as f:
+                    cfg = json.load(f)
+            except Exception:
+                cfg = {}
+        channel = cfg.get("update_channel")
+        if channel in CHANNEL_BRANCHES:
+            return channel
+        try:
+            head = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                cwd=base_dir, capture_output=True, text=True, timeout=5,
+            ).stdout.strip()
+        except Exception:
+            head = ""
+        return "beta" if head == "beta" else "stable"
+
     @app.route("/api/update/status", methods=["GET"])
     def update_status():
         import subprocess
+
+        def _git(*args, timeout=10):
+            return subprocess.run(["git", *args], cwd=base_dir,
+                                  capture_output=True, text=True, timeout=timeout)
+
         try:
-            subprocess.run(["git", "fetch"], cwd=base_dir, capture_output=True, timeout=10)
-            result = subprocess.run(
-                ["git", "rev-list", "HEAD..origin/main", "--count"],
-                cwd=base_dir, capture_output=True, text=True, timeout=5
-            )
-            behind = int(result.stdout.strip() or "0")
-            can_self, reason = check_self_update(base_dir)
+            channel = _current_channel()
+            branch = CHANNEL_BRANCHES[channel]
+            _git("fetch", timeout=15)
+            version = _git("log", "-1", "--pretty=%h %s", timeout=5).stdout.strip()
+            head = _git("rev-parse", "HEAD", timeout=5).stdout.strip()
+            target_res = _git("rev-parse", f"origin/{branch}", timeout=5)
+            if target_res.returncode != 0:
+                return jsonify({
+                    "updates_available": False, "commits_behind": 0,
+                    "channel": channel, "branch": branch,
+                    "current_version": version,
+                    "can_self_update": True, "manual_reason": None,
+                    "note": f"Branch '{branch}' not found on origin",
+                })
+            behind_res = _git("rev-list", f"HEAD..origin/{branch}", "--count", timeout=5)
+            behind = int(behind_res.stdout.strip() or "0")
+            can_self, reason = check_self_update(base_dir, branch)
             return jsonify({
-                "updates_available": behind > 0,
+                # HEAD != target also covers channel switches, where the new
+                # channel's branch may be *behind* the running commit (a
+                # deliberate downgrade back to stable)
+                "updates_available": head != target_res.stdout.strip(),
                 "commits_behind": behind,
+                "channel": channel,
+                "branch": branch,
+                "current_version": version,
                 "can_self_update": can_self,
                 "manual_reason": reason,
             })
@@ -574,23 +627,36 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
 
     @app.route("/api/update/apply", methods=["POST"])
     def update_apply():
-        """Self-update: git pull + pip install, then exit so systemd restarts
-        us on the new code (Restart=always) — no sudo needed. Refuses when the
-        update would change the systemd unit; that path needs update.sh."""
+        """Self-update: sync to the channel's branch + pip install, then exit
+        so systemd restarts us on the new code (Restart=always) — no sudo
+        needed. Refuses when the update would change the systemd unit; that
+        path needs update.sh."""
         import subprocess
         import sys
 
-        can_self, reason = check_self_update(base_dir)
+        channel = _current_channel()
+        branch = CHANNEL_BRANCHES[channel]
+        can_self, reason = check_self_update(base_dir, branch)
         if not can_self:
             return jsonify({"error": reason}), 409
 
-        pull = subprocess.run(
-            ["git", "pull", "--ff-only"],
+        fetch = subprocess.run(
+            ["git", "fetch", "origin"],
             cwd=base_dir, capture_output=True, text=True, timeout=120,
+        )
+        if fetch.returncode != 0:
+            detail = (fetch.stderr or fetch.stdout).strip()
+            return jsonify({"error": f"git fetch failed: {detail}"}), 500
+
+        # checkout -B syncs the local branch to origin's, handling normal
+        # updates, switching onto beta, and downgrading back to stable alike
+        pull = subprocess.run(
+            ["git", "checkout", "-B", branch, f"origin/{branch}"],
+            cwd=base_dir, capture_output=True, text=True, timeout=60,
         )
         if pull.returncode != 0:
             detail = (pull.stderr or pull.stdout).strip()
-            return jsonify({"error": f"git pull failed: {detail}"}), 500
+            return jsonify({"error": f"git checkout failed: {detail}"}), 500
 
         pip = subprocess.run(
             [sys.executable, "-m", "pip", "install", "-q", "--upgrade", "-r",
@@ -606,9 +672,9 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
             cwd=base_dir, capture_output=True, text=True, timeout=5,
         )
         version = head.stdout.strip()
-        state.add_log(f"Update applied ({version}) — restarting")
+        state.add_log(f"Update applied ({channel}: {version}) — restarting")
         if log_path:
-            write_log(log_path, f"Update applied ({version}) — restarting")
+            write_log(log_path, f"Update applied ({channel}: {version}) — restarting")
 
         # Exit after the response has flushed; systemd restarts the service
         # with the freshly pulled code

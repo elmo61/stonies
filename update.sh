@@ -36,8 +36,26 @@ main() {
     fi
 
     if [[ "${1:-}" != "--skip-pull" ]]; then
-        echo ">>> [1/4] Pulling latest code..."
-        git pull --ff-only
+        # Follow the release channel from config.json (set in the web UI):
+        # stable -> main, beta -> beta. If unset, keep whatever branch is
+        # checked out — never yank a manually-switched device off its branch.
+        CHANNEL=$("$APP_DIR/env/bin/python" -c \
+            "import json,sys; print(json.load(open(sys.argv[1])).get('update_channel',''))" \
+            "$APP_DIR/config.json" 2>/dev/null || echo "")
+        case "$CHANNEL" in
+            stable) BRANCH=main ;;
+            beta)   BRANCH=beta ;;
+            *)      BRANCH="$(git rev-parse --abbrev-ref HEAD)" ;;
+        esac
+        if [[ "$BRANCH" == "main" || "$BRANCH" == "beta" ]]; then
+            echo ">>> [1/4] Syncing to origin/$BRANCH (${CHANNEL:-$BRANCH} channel)..."
+            git fetch origin
+            git checkout -B "$BRANCH" "origin/$BRANCH"
+        else
+            # developer checkout on a feature branch — plain pull, no switching
+            echo ">>> [1/4] Pulling latest code on branch $BRANCH..."
+            git pull --ff-only
+        fi
     else
         echo ">>> [1/4] Skipping git pull"
     fi

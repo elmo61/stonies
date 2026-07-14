@@ -85,7 +85,9 @@
               :class="{'is-loading': updateApplying}"
               :disabled="updateApplying"
               @click="applyUpdate"
-              :title="`${updateCommits} commit${updateCommits !== 1 ? 's' : ''} behind origin/main`"
+              :title="updateCommits > 0
+                ? `${updateCommits} commit${updateCommits !== 1 ? 's' : ''} behind origin/${updateBranch}`
+                : `Switch to the current ${updateChannel} channel version`"
             >
               ⬆️ Update now
             </button>
@@ -565,6 +567,22 @@
         </div>
         <p v-if="sleepSaveStatus" class="help is-success mb-0">{{ sleepSaveStatus }}</p>
 
+        <hr />
+
+        <h3 class="title is-6 mb-3">🧪 Release Channel</h3>
+        <div class="field">
+          <label class="radio is-block mb-1">
+            <input type="radio" value="stable" v-model="updateChannel" @change="saveChannel" class="mr-1" />
+            <strong>Stable</strong> — tested releases (recommended)
+          </label>
+          <label class="radio is-block ml-0">
+            <input type="radio" value="beta" v-model="updateChannel" @change="saveChannel" class="mr-1" />
+            <strong>Beta</strong> — newest features first, may be rough
+          </label>
+        </div>
+        <p v-if="channelSaveStatus" class="help is-success mb-2">{{ channelSaveStatus }}</p>
+        <p v-if="currentVersion" class="help has-text-grey mb-0">Running: {{ currentVersion }}</p>
+
       </section>
       <footer class="modal-card-foot" style="justify-content: flex-end;">
         <button class="button" @click="showSettings = false">Close</button>
@@ -816,6 +834,10 @@ const updateManualReason = ref('')
 const updateApplying = ref(false)
 const updateMessage = ref('')
 const updateError = ref('')
+const updateChannel = ref('stable')
+const updateBranch = ref('main')
+const currentVersion = ref('')
+const channelSaveStatus = ref('')
 
 async function checkForUpdates() {
   try {
@@ -826,8 +848,32 @@ async function checkForUpdates() {
       updateCommits.value = data.commits_behind
       canSelfUpdate.value = data.can_self_update !== false
       updateManualReason.value = data.manual_reason || ''
+      if (data.channel) updateChannel.value = data.channel
+      if (data.branch) updateBranch.value = data.branch
+      currentVersion.value = data.current_version || ''
     }
   } catch (_) {}
+}
+
+async function saveChannel() {
+  channelSaveStatus.value = ''
+  try {
+    const res = await fetch(`${API}/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ update_channel: updateChannel.value }),
+    })
+    const data = await res.json()
+    if (data.error) throw new Error(data.error)
+    channelSaveStatus.value = 'Saved — checking this channel…'
+    await checkForUpdates()
+    channelSaveStatus.value = updateAvailable.value
+      ? 'Saved — an update to this channel is ready (⬆️ button in the top bar)'
+      : 'Saved — already up to date on this channel'
+    setTimeout(() => channelSaveStatus.value = '', 6000)
+  } catch (e) {
+    channelSaveStatus.value = `Error: ${e.message}`
+  }
 }
 
 async function applyUpdate() {
