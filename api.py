@@ -14,8 +14,9 @@ from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
-from nfc_daemon import cast_audiobook, cast_song, lookup_song, check_and_schedule_sleep, update_play_stats
+from nfc_daemon import cast_audiobook, cast_song, find_cast, lookup_song, check_and_schedule_sleep, update_play_stats
 from activity_log import write_log
+from storage import save_json
 
 
 AUDIO_EXTS = (".mp3", ".m4a")
@@ -80,6 +81,14 @@ def scan_audiobooks(music_folder, existing_songs):
         })
 
     return new_entries
+
+
+def download_file(url, dest, timeout=60):
+    """Download url to dest with a socket timeout. urlretrieve has no timeout —
+    a peer disappearing mid-transfer used to hang the sync thread forever,
+    leaving the job stuck on "running" until the next restart."""
+    with urllib.request.urlopen(url, timeout=timeout) as resp, open(dest, "wb") as out:
+        shutil.copyfileobj(resp, out)
 
 
 def run_sync(peer_hostname, pi_ip, songs_path, songs_lock, music_folder,
@@ -151,7 +160,7 @@ def run_sync(peer_hostname, pi_ip, songs_path, songs_lock, music_folder,
                 if peer_img and "/images/" in peer_img:
                     img_filename = peer_img.rsplit("/images/", 1)[-1]
                     local_img = os.path.join(images_folder, img_filename)
-                    urllib.request.urlretrieve(
+                    download_file(
                         f"{peer_url}/images/{url_quote(img_filename)}", local_img
                     )
                     song_copy["image_url"] = f"http://{pi_ip}:5000/images/{img_filename}"
@@ -163,7 +172,7 @@ def run_sync(peer_hostname, pi_ip, songs_path, songs_lock, music_folder,
                     os.makedirs(folder_path, exist_ok=True)
                     for ch in chapters:
                         ch_file = ch["filename"]
-                        urllib.request.urlretrieve(
+                        download_file(
                             f"{peer_url}/music/{url_quote(folder)}/{url_quote(ch_file)}",
                             os.path.join(folder_path, ch_file),
                         )
@@ -174,7 +183,7 @@ def run_sync(peer_hostname, pi_ip, songs_path, songs_lock, music_folder,
                     ]
                 else:
                     filename = song.get("filename", "")
-                    urllib.request.urlretrieve(
+                    download_file(
                         f"{peer_url}/music/{url_quote(filename)}",
                         os.path.join(music_folder, filename),
                     )
@@ -187,8 +196,7 @@ def run_sync(peer_hostname, pi_ip, songs_path, songs_lock, music_folder,
                     # Double-check it still doesn't exist (race safety)
                     if not any(s["id"] == song_id for s in songs):
                         songs.append(song_copy)
-                        with open(songs_path, "w") as f:
-                            json.dump(songs, f, indent=2)
+                        save_json(songs_path, songs)
 
                 pulled.append(song_name)
 
@@ -306,8 +314,7 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
                 existing["speaker"] = speaker
             if sleep_timer is not None:
                 existing["sleep_timer"] = sleep_timer
-            with open(config_path, "w") as f:
-                json.dump(existing, f, indent=2)
+            save_json(config_path, existing)
         return jsonify({"ok": True, "speaker": existing.get("speaker", ""),
                         "sleep_timer": existing.get("sleep_timer")})
 
@@ -321,13 +328,18 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
             try:
                 with open(songs_path, "r") as f:
                     songs = json.load(f)
-            except Exception:
+            except FileNotFoundError:
                 songs = []
+            except Exception as e:
+                # A corrupt songs.json must never be treated as an empty
+                # library — the rescan below would regenerate every song ID
+                # and silently orphan all written NFC tags.
+                state.add_log(f"songs.json unreadable: {e}")
+                return jsonify({"error": f"songs.json unreadable: {e}", "songs": []}), 500
             new_audiobooks = scan_audiobooks(music_folder, songs)
             if new_audiobooks:
                 songs.extend(new_audiobooks)
-                with open(songs_path, "w") as f:
-                    json.dump(songs, f, indent=2)
+                save_json(songs_path, songs)
         return jsonify({"songs": songs})
 
     @app.route("/api/songs", methods=["POST"])
@@ -409,8 +421,7 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
             except Exception:
                 songs = []
             songs.append(song)
-            with open(songs_path, "w") as f:
-                json.dump(songs, f, indent=2)
+            save_json(songs_path, songs)
 
         # Only request NFC write if the hardware is available
         if not state._hw_error:
@@ -437,8 +448,7 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
                     break
             else:
                 return jsonify({"error": "Song not found"}), 404
-            with open(songs_path, "w") as f:
-                json.dump(songs, f, indent=2)
+            save_json(songs_path, songs)
         return jsonify({"ok": True, "name": name})
 
     @app.route("/api/songs/<song_id>/progress", methods=["DELETE"])
@@ -455,8 +465,7 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
                     break
             else:
                 return jsonify({"error": "Song not found"}), 404
-            with open(songs_path, "w") as f:
-                json.dump(songs, f, indent=2)
+            save_json(songs_path, songs)
         return jsonify({"ok": True})
 
     @app.route("/api/songs/<song_id>", methods=["DELETE"])
@@ -473,8 +482,7 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
                 if s.get("id") == song_id:
                     removed = s
                     break
-            with open(songs_path, "w") as f:
-                json.dump(updated, f, indent=2)
+            save_json(songs_path, updated)
 
         if removed:
             if removed.get("type") == "audiobook":
@@ -585,8 +593,7 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
                         errors.append(f"{entry}: {e}")
 
             if imported:
-                with open(songs_path, "w") as f:
-                    json.dump(songs, f, indent=2)
+                save_json(songs_path, songs)
 
         return jsonify({"imported": imported, "errors": errors, "songs": songs})
 
@@ -623,8 +630,7 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
                     if s.get("id") == pending_id:
                         removed = s
                         break
-                with open(songs_path, "w") as f:
-                    json.dump(updated, f, indent=2)
+                save_json(songs_path, updated)
             if removed:
                 if removed.get("type") == "audiobook":
                     folder_path = os.path.join(music_folder, removed.get("folder", ""))
@@ -726,8 +732,7 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
             except Exception:
                 cfg = {}
             cfg["sync_peer"] = peer
-            with open(config_path, "w") as f:
-                json.dump(cfg, f, indent=2)
+            save_json(config_path, cfg)
 
         return jsonify({"missing": missing, "peer": peer})
 
@@ -834,7 +839,7 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
     @app.route("/api/playback/status")
     def playback_status():
         # Reads from state + songs.json only — no Chromecast connection.
-        # Position is kept fresh by the background run_position_tracker thread.
+        # Position is kept fresh by the CastMonitor's push-driven saves.
         with state._lock:
             playing = state._stonies_playing
             song_id = state._current_song_id
@@ -871,8 +876,6 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
 
     @app.route("/api/playback/stop", methods=["POST"])
     def playback_stop():
-        import pychromecast
-
         with config_lock:
             try:
                 with open(config_path, "r") as f:
@@ -886,16 +889,8 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
 
         try:
             import time as _time
-            chromecasts, browser = pychromecast.get_listed_chromecasts(
-                friendly_names=[speaker_name]
-            )
-            if not chromecasts:
-                pychromecast.discovery.stop_discovery(browser)
-                return jsonify({"error": f"Speaker '{speaker_name}' not found"}), 404
-            cast = chromecasts[0]
+            cast = find_cast(speaker_name, timeout=5)
             try:
-                cast.wait(timeout=5)
-                pychromecast.discovery.stop_discovery(browser)
                 mc = cast.media_controller
                 mc.update_status()
                 _time.sleep(1)

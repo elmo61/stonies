@@ -1,7 +1,7 @@
 import os
 import threading
 
-from nfc_daemon import NFCState, run_daemon, get_ip
+from nfc_daemon import NFCState, run_daemon, run_watchdog, get_ip
 from cast_monitor import CastMonitor
 from api import create_app
 
@@ -37,6 +37,23 @@ if __name__ == "__main__":
     )
     daemon_thread.start()
 
+    # Restarts the process (via systemd) if the NFC loop hangs inside an I2C call
+    watchdog_thread = threading.Thread(
+        target=run_watchdog,
+        args=(state,),
+        kwargs={"log_path": log_path},
+        daemon=True,
+    )
+    watchdog_thread.start()
+
     app = create_app(state, songs_lock, config_lock, music_folder, import_folder, images_folder, songs_path, config_path, pi_ip, log_path, monitor=monitor)
-    print(f"[Main] Starting Flask on http://{pi_ip}:5000")
-    app.run(host="0.0.0.0", port=5000, threaded=True)
+    try:
+        from waitress import serve
+    except ImportError:
+        # Dev fallback — the Flask dev server spawns an unbounded thread per
+        # request, which amplifies resource exhaustion on long uptimes
+        print(f"[Main] waitress not installed — starting Flask dev server on http://{pi_ip}:5000")
+        app.run(host="0.0.0.0", port=5000, threaded=True)
+    else:
+        print(f"[Main] Starting waitress on http://{pi_ip}:5000")
+        serve(app, host="0.0.0.0", port=5000, threads=8)

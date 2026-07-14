@@ -1,10 +1,13 @@
 import ctypes
 import ctypes.util
 import json
+import os
 import socket
 import time
 import threading
 from datetime import datetime
+
+from storage import save_json
 
 
 def _set_thread_name(name):
@@ -40,12 +43,42 @@ def _resolve_cast_ip(fallback_ip, log_fn=None):
     return ip
 
 
+def find_cast(speaker_name, timeout=10):
+    """Discover and connect to the named speaker, returning a connected Chromecast.
+
+    Discovery is always stopped, even on failure — a leaked browser costs
+    ~5 zeroconf threads plus multicast sockets per call, which accumulates
+    until the whole process runs out of resources. Connection retries are
+    bounded (tries=2) so a failed socket can never retry forever.
+    Raises RuntimeError if the speaker is not found.
+    """
+    import pychromecast
+
+    chromecasts, browser = pychromecast.get_listed_chromecasts(
+        friendly_names=[speaker_name], tries=2
+    )
+    try:
+        if not chromecasts:
+            raise RuntimeError(f"Speaker '{speaker_name}' not found")
+        cast = chromecasts[0]
+        try:
+            cast.wait(timeout=timeout)
+        except Exception:
+            try:
+                cast.disconnect()
+            except Exception:
+                pass
+            raise
+        return cast
+    finally:
+        pychromecast.discovery.stop_discovery(browser)
+
+
 class NFCState:
     """Thread-safe shared state between the NFC daemon and Flask threads."""
 
     def __init__(self):
         self._lock = threading.Lock()
-        self._event = threading.Event()
         self._mode = "listening"       # "listening" | "writing"
         self._sub_state = None         # None | "waiting_for_tag" | "writing_tag" | "success" | "error"
         self._pending_song_id = None
@@ -142,7 +175,6 @@ class NFCState:
             self._sub_state = "waiting_for_tag"
             self._error_msg = None
             self._write_started_at = time.time()
-        self._event.set()
 
     def cancel_write(self):
         with self._lock:
@@ -150,7 +182,6 @@ class NFCState:
             self._sub_state = None
             self._pending_song_id = None
             self._error_msg = None
-        self._event.set()
 
     def set_hw_error(self, msg):
         with self._lock:
@@ -263,15 +294,13 @@ def update_play_stats(song_id, songs_path, songs_lock):
                     if not s.get("first_played"):
                         s["first_played"] = now
                     break
-            with open(songs_path, "w") as f:
-                json.dump(songs, f, indent=2)
+            save_json(songs_path, songs)
         except Exception:
             pass
 
 
 def cast_audiobook(song, config_path, config_lock, pi_ip, start_index=0, start_time=0, log_fn=None):
     """Queue all chapters of an audiobook on the configured speaker. Raises on any failure."""
-    import pychromecast
     from urllib.parse import quote
 
     pi_ip = _resolve_cast_ip(pi_ip, log_fn)
@@ -325,17 +354,8 @@ def cast_audiobook(song, config_path, config_lock, pi_ip, start_index=0, start_t
             },
         })
 
-    chromecasts, browser = pychromecast.get_listed_chromecasts(
-        friendly_names=[speaker_name]
-    )
-    if not chromecasts:
-        pychromecast.discovery.stop_discovery(browser)
-        raise RuntimeError(f"Speaker '{speaker_name}' not found")
-
-    cast = chromecasts[0]
+    cast = find_cast(speaker_name)
     try:
-        cast.wait(timeout=10)
-        pychromecast.discovery.stop_discovery(browser)
         mc = cast.media_controller
         mc.update_status()
         time.sleep(0.5)
@@ -363,7 +383,6 @@ def cast_audiobook(song, config_path, config_lock, pi_ip, start_index=0, start_t
 
 def cast_song(song, config_path, config_lock, pi_ip, log_fn=None):
     """Cast a song to the configured speaker. Raises on any failure."""
-    import pychromecast
     from urllib.parse import quote
 
     pi_ip = _resolve_cast_ip(pi_ip, log_fn)
@@ -389,17 +408,8 @@ def cast_song(song, config_path, config_lock, pi_ip, log_fn=None):
     if log_fn:
         log_fn(msg)
 
-    chromecasts, browser = pychromecast.get_listed_chromecasts(
-        friendly_names=[speaker_name]
-    )
-    if not chromecasts:
-        pychromecast.discovery.stop_discovery(browser)
-        raise RuntimeError(f"Speaker '{speaker_name}' not found")
-
-    cast = chromecasts[0]
+    cast = find_cast(speaker_name)
     try:
-        cast.wait(timeout=10)
-        pychromecast.discovery.stop_discovery(browser)
         mc = cast.media_controller
         mc.update_status()
         time.sleep(0.5)
@@ -439,7 +449,6 @@ def sleep_timer_seconds(config):
 def make_stop_fn(config_path, config_lock, pi_ip, state, log_path=None):
     """Return a callback that stops Chromecast playback (used by sleep timer)."""
     def _stop():
-        import pychromecast
         import time as _time
         from activity_log import write_log
         try:
@@ -449,16 +458,8 @@ def make_stop_fn(config_path, config_lock, pi_ip, state, log_path=None):
             speaker_name = cfg.get("speaker", "").strip()
             if not speaker_name:
                 return
-            chromecasts, browser = pychromecast.get_listed_chromecasts(
-                friendly_names=[speaker_name]
-            )
-            if not chromecasts:
-                pychromecast.discovery.stop_discovery(browser)
-                return
-            cast = chromecasts[0]
+            cast = find_cast(speaker_name, timeout=5)
             try:
-                cast.wait(timeout=5)
-                pychromecast.discovery.stop_discovery(browser)
                 mc = cast.media_controller
                 mc.update_status()
                 _time.sleep(1)
@@ -492,145 +493,148 @@ def check_and_schedule_sleep(state, config_path, config_lock, pi_ip, log_path=No
 
 
 # ---------------------------------------------------------------------------
-# Position tracker (runs every 2 minutes, saves progress to songs.json)
-# ---------------------------------------------------------------------------
-
-def run_position_tracker(state, songs_path, songs_lock, config_path, config_lock):
-    """Background thread: polls Chromecast every 5 minutes as a fallback position save.
-    The cast_monitor handles most position updates via push events; this is a safety net."""
-    _set_thread_name("pos-tracker")
-    import pychromecast
-    from urllib.parse import unquote, urlparse
-    import time as _time
-
-    while True:
-        _time.sleep(300)
-
-        with state._lock:
-            playing = state._stonies_playing
-            song_id = state._current_song_id
-
-        if not playing or not song_id:
-            continue
-
-        try:
-            with config_lock:
-                with open(config_path, "r") as f:
-                    config = json.load(f)
-            speaker_name = config.get("speaker", "").strip()
-            if not speaker_name:
-                continue
-
-            chromecasts, browser = pychromecast.get_listed_chromecasts(
-                friendly_names=[speaker_name]
-            )
-            if not chromecasts:
-                pychromecast.discovery.stop_discovery(browser)
-                continue
-
-            cast = chromecasts[0]
-            player_state = None
-            idle_reason = None
-            content_id = ""
-            current_time = 0
-            try:
-                cast.wait(timeout=10)
-                pychromecast.discovery.stop_discovery(browser)
-                mc = cast.media_controller
-                mc.update_status()
-                _time.sleep(1)
-                # Capture all values before disconnect clears the status object
-                if mc.status:
-                    player_state = mc.status.player_state
-                    idle_reason = mc.status.idle_reason
-                    content_id = mc.status.content_id or ""
-                    current_time = round(mc.status.current_time or 0, 1)
-            finally:
-                cast.disconnect()
-
-            if player_state not in ("PLAYING", "PAUSED", "BUFFERING"):
-                # If finished, clear audiobook progress so next play starts from beginning
-                if idle_reason == "FINISHED":
-                    with songs_lock:
-                        try:
-                            with open(songs_path, "r") as f:
-                                songs = json.load(f)
-                            for s in songs:
-                                if s.get("id") == song_id and s.get("type") in ("audiobook", "album"):
-                                    s.pop("progress", None)
-                                    break
-                            with open(songs_path, "w") as f:
-                                json.dump(songs, f, indent=2)
-                        except Exception:
-                            pass
-                state.set_playing(False)
-                continue
-
-            # Identify chapter from content URL for audiobooks
-            chapter_idx = None
-            try:
-                parts = urlparse(content_id).path.split("/music/", 1)
-                if len(parts) == 2:
-                    path_parts = unquote(parts[1]).split("/", 1)
-                    if len(path_parts) == 2:
-                        folder, ch_file = path_parts
-                        with songs_lock:
-                            with open(songs_path, "r") as f:
-                                songs = json.load(f)
-                        for s in songs:
-                            if s.get("id") == song_id and s.get("type") in ("audiobook", "album"):
-                                for i, ch in enumerate(s.get("chapters", [])):
-                                    if ch.get("filename") == ch_file:
-                                        chapter_idx = i
-                                        break
-                                break
-            except Exception:
-                pass
-
-            # Save progress for audiobooks only
-            with songs_lock:
-                try:
-                    with open(songs_path, "r") as f:
-                        songs = json.load(f)
-                except Exception:
-                    continue
-                for s in songs:
-                    if s.get("id") == song_id and s.get("type") == "audiobook":
-                        progress = {
-                            "current_time": current_time,
-                            "updated_at": datetime.now().isoformat(timespec="seconds"),
-                        }
-                        if chapter_idx is not None:
-                            progress["chapter_index"] = chapter_idx
-                            with state._lock:
-                                state._current_chapter_index = chapter_idx
-                        s["progress"] = progress
-                        with open(songs_path, "w") as f:
-                            json.dump(songs, f, indent=2)
-                        state.add_log(f"Progress saved: ch{(chapter_idx or 0) + 1} @ {int(current_time)}s")
-                        break
-
-        except Exception as e:
-            state.add_log(f"Position tracker error: {e}")
-
-
-# ---------------------------------------------------------------------------
 # Daemon loop
 # ---------------------------------------------------------------------------
 
+def _init_pn532():
+    """Create the I2C bus and PN532, and configure it. Returns (i2c, pn532)."""
+    import board
+    import busio
+    from adafruit_pn532.i2c import PN532_I2C
+
+    i2c = busio.I2C(board.SCL, board.SDA)
+    pn532 = PN532_I2C(i2c, debug=False)
+    pn532.SAM_configuration()
+    return i2c, pn532
+
+
+def _daemon_iteration(state, pn532, songs_path, songs_lock, config_path,
+                      config_lock, pi_ip, log_path, monitor):
+    """One pass of the NFC loop. Raises on reader/I2C errors."""
+    mode = state._get_mode()
+
+    if mode == "listening":
+        uid = pn532.read_passive_target(timeout=0.5)
+        if uid is None:
+            return
+        uid_str = uid.hex().upper()
+        state.add_log(f"Tag detected: {uid_str}")
+        id_str = None
+        song = None
+        try:
+            raw = read_blocks(pn532)
+            print(f"[NFC] Tag read: '{raw}'")
+            PREFIX = "stonies:"
+            if raw and not raw.startswith(PREFIX):
+                state.add_log(f"Unrecognized tag (not a Stonies tag): \"{raw[:20]}\"")
+                id_str = None
+            else:
+                id_str = raw[len(PREFIX):] if raw else None
+            if id_str:
+                song = lookup_song(id_str, songs_path, songs_lock)
+                if song:
+                    if state._get_offline():
+                        print(f"[NFC] Offline — tag matched: '{song['name']}'")
+                        state._set_last_seen(song)
+                        state.add_log(f"Offline — matched \"{song['name']}\" (not casting)")
+                    else:
+                        print(f"[NFC] Casting '{song['name']}'...")
+                        state.add_log(f"Casting \"{song['name']}\"...")
+                        state.set_playing(True)
+                        def _do_cast(s=song):
+                            try:
+                                if s.get("type") in ("audiobook", "album"):
+                                    prog = s.get("progress", {})
+                                    start_index = prog.get("chapter_index", 0)
+                                    cast_audiobook(
+                                        s, config_path, config_lock, pi_ip,
+                                        start_index=start_index,
+                                        start_time=prog.get("current_time", 0),
+                                        log_fn=state.add_log,
+                                    )
+                                    state.set_now_playing(s["id"], chapter_index=start_index)
+                                else:
+                                    cast_song(s, config_path, config_lock, pi_ip,
+                                              log_fn=state.add_log)
+                                    state.set_now_playing(s["id"])
+                                if monitor:
+                                    monitor.on_play()
+                                update_play_stats(s["id"], songs_path, songs_lock)
+                                print(f"[NFC] Now playing '{s['name']}'")
+                                state.add_log(f"Now playing \"{s['name']}\"")
+                                if log_path:
+                                    from activity_log import write_log
+                                    write_log(log_path, f'"{s["name"]}" started playing (NFC)')
+                                check_and_schedule_sleep(state, config_path, config_lock, pi_ip, log_path)
+                            except Exception as e:
+                                print(f"[NFC] Cast error: {e}")
+                                state.add_log(f"Cast failed: {e}")
+                                state.set_playing(False)
+                        t = threading.Thread(target=_do_cast, daemon=True)
+                        t.start()
+                else:
+                    print(f"[NFC] No song found for id '{id_str}'")
+                    state.add_log(f"No song found for ID \"{id_str}\"")
+            else:
+                state.add_log(f"Tag {uid_str}: no data")
+        except Exception as e:
+            print(f"[NFC] Read error: {e}")
+            state.add_log(f"Read error: {e}")
+        # Longer pause after a recognised song so holding the tag doesn't re-trigger
+        debounce = 5 if (id_str and song) else 3
+        time.sleep(debounce)
+
+    elif mode == "writing":
+        song_id = state._get_write_id()
+        if song_id is None:
+            time.sleep(0.1)
+            return
+
+        # Auto-cancel after 20 seconds if no tag presented (song stays saved)
+        with state._lock:
+            started = state._write_started_at
+        if started and (time.time() - started) > 20:
+            state.add_log("Write timed out — no tag presented. Song is saved.")
+            print("[NFC] Write mode timed out, reverting to listening")
+            state._revert_to_listening()
+            return
+
+        state._set_sub_state("waiting_for_tag")
+        uid = pn532.read_passive_target(timeout=0.5)
+
+        if uid is not None:
+            state._set_sub_state("writing_tag")
+            state.add_log(f"Writing tag for song \"{song_id}\"...")
+            try:
+                write_blocks(pn532, f"stonies:{song_id}")
+                print(f"[NFC] Wrote song id '{song_id}' to tag")
+                state.add_log(f"Tag written successfully for \"{song_id}\"")
+                state._set_sub_state("success")
+                time.sleep(5)
+            except Exception as e:
+                print(f"[NFC] Write error: {e}")
+                state.add_log(f"Write failed: {e}")
+                state._set_sub_state("error", error_msg=str(e))
+                time.sleep(5)
+            finally:
+                state._revert_to_listening()
+    else:
+        time.sleep(0.1)
+
+
 def run_daemon(state, songs_path, songs_lock, config_path, config_lock, pi_ip, log_path=None, monitor=None):
-    """Background NFC loop. Owns the PN532 exclusively."""
+    """Background NFC loop. Owns the PN532 exclusively.
+
+    Self-healing: on repeated errors it re-configures the PN532, then rebuilds
+    the whole I2C bus, and as a last resort exits the process so systemd
+    (Restart=always) brings everything back in a known-good state. Previously
+    a wedged reader stayed dead until the Pi was rebooted.
+    """
     _set_thread_name("nfc-daemon")
     from activity_log import write_log
 
     try:
-        import board
-        import busio
-        from adafruit_pn532.i2c import PN532_I2C
-
-        i2c = busio.I2C(board.SCL, board.SDA, frequency=100000)
-        pn532 = PN532_I2C(i2c, debug=False)
-        pn532.SAM_configuration()
+        i2c, pn532 = _init_pn532()
         print("[NFC] PN532 online. Listening for tags...")
         state.add_log("NFC reader online")
         if log_path:
@@ -641,119 +645,78 @@ def run_daemon(state, songs_path, songs_lock, config_path, config_lock, pi_ip, l
         state.set_hw_error(msg)
         return  # Flask still runs; daemon exits cleanly
 
+    consecutive_errors = 0
+
     while True:
-      try:
-        with state._lock:
-            state._nfc_heartbeat = time.time()
-        mode = state._get_mode()
-
-        if mode == "listening":
-            uid = pn532.read_passive_target(timeout=0.5)
-            if uid is not None:
-                uid_str = uid.hex().upper()
-                state.add_log(f"Tag detected: {uid_str}")
-                id_str = None
-                song = None
-                try:
-                    raw = read_blocks(pn532)
-                    print(f"[NFC] Tag read: '{raw}'")
-                    PREFIX = "stonies:"
-                    if raw and not raw.startswith(PREFIX):
-                        state.add_log(f"Unrecognized tag (not a Stonies tag): \"{raw[:20]}\"")
-                        id_str = None
-                    else:
-                        id_str = raw[len(PREFIX):] if raw else None
-                    if id_str:
-                        song = lookup_song(id_str, songs_path, songs_lock)
-                        if song:
-                            if state._get_offline():
-                                print(f"[NFC] Offline — tag matched: '{song['name']}'")
-                                state._set_last_seen(song)
-                                state.add_log(f"Offline — matched \"{song['name']}\" (not casting)")
-                            else:
-                                print(f"[NFC] Casting '{song['name']}'...")
-                                state.add_log(f"Casting \"{song['name']}\"...")
-                                state.set_playing(True)
-                                def _do_cast(s=song):
-                                    try:
-                                        if s.get("type") in ("audiobook", "album"):
-                                            prog = s.get("progress", {})
-                                            start_index = prog.get("chapter_index", 0)
-                                            cast_audiobook(
-                                                s, config_path, config_lock, pi_ip,
-                                                start_index=start_index,
-                                                start_time=prog.get("current_time", 0),
-                                                log_fn=state.add_log,
-                                            )
-                                            state.set_now_playing(s["id"], chapter_index=start_index)
-                                        else:
-                                            cast_song(s, config_path, config_lock, pi_ip,
-                                                      log_fn=state.add_log)
-                                            state.set_now_playing(s["id"])
-                                        if monitor:
-                                            monitor.on_play()
-                                        update_play_stats(s["id"], songs_path, songs_lock)
-                                        print(f"[NFC] Now playing '{s['name']}'")
-                                        state.add_log(f"Now playing \"{s['name']}\"")
-                                        if log_path:
-                                            write_log(log_path, f'"{s["name"]}" started playing (NFC)')
-                                        check_and_schedule_sleep(state, config_path, config_lock, pi_ip, log_path)
-                                    except Exception as e:
-                                        print(f"[NFC] Cast error: {e}")
-                                        state.add_log(f"Cast failed: {e}")
-                                        state.set_playing(False)
-                                t = threading.Thread(target=_do_cast, daemon=True)
-                                t.start()
-                        else:
-                            print(f"[NFC] No song found for id '{id_str}'")
-                            state.add_log(f"No song found for ID \"{id_str}\"")
-                    else:
-                        state.add_log(f"Tag {uid_str}: no data")
-                except Exception as e:
-                    print(f"[NFC] Read error: {e}")
-                    state.add_log(f"Read error: {e}")
-                # Longer pause after a recognised song so holding the tag doesn't re-trigger
-                debounce = 5 if (id_str and song) else 3
-                time.sleep(debounce)
-
-        elif mode == "writing":
-            song_id = state._get_write_id()
-            if song_id is None:
-                time.sleep(0.1)
-                continue
-
-            # Auto-cancel after 20 seconds if no tag presented (song stays saved)
+        try:
             with state._lock:
-                started = state._write_started_at
-            if started and (time.time() - started) > 20:
-                state.add_log("Write timed out — no tag presented. Song is saved.")
-                print("[NFC] Write mode timed out, reverting to listening")
-                state._revert_to_listening()
-                continue
+                state._nfc_heartbeat = time.time()
+            _daemon_iteration(state, pn532, songs_path, songs_lock,
+                              config_path, config_lock, pi_ip, log_path, monitor)
+            if consecutive_errors:
+                print("[NFC] Reader recovered")
+                state.add_log("NFC reader recovered")
+                if log_path:
+                    write_log(log_path, "NFC reader recovered")
+            consecutive_errors = 0
+        except Exception as e:
+            consecutive_errors += 1
+            print(f"[NFC] Daemon loop error #{consecutive_errors} (will retry): {e}")
+            if consecutive_errors == 1:
+                # Log only the first of a run of errors — one per second
+                # would drown the activity log
+                state.add_log(f"NFC error (retrying): {e}")
+            time.sleep(1)
 
-            state._set_sub_state("waiting_for_tag")
-            uid = pn532.read_passive_target(timeout=0.5)
-
-            if uid is not None:
-                state._set_sub_state("writing_tag")
-                state.add_log(f"Writing tag for song \"{song_id}\"...")
+            # Escalating recovery: re-configure the chip, then rebuild the
+            # bus from scratch, then give up and let systemd restart us.
+            if consecutive_errors in (5, 10):
                 try:
-                    write_blocks(pn532, f"stonies:{song_id}")
-                    print(f"[NFC] Wrote song id '{song_id}' to tag")
-                    state.add_log(f"Tag written successfully for \"{song_id}\"")
-                    state._set_sub_state("success")
-                    time.sleep(5)
-                except Exception as e:
-                    print(f"[NFC] Write error: {e}")
-                    state.add_log(f"Write failed: {e}")
-                    state._set_sub_state("error", error_msg=str(e))
-                    time.sleep(5)
-                finally:
-                    state._revert_to_listening()
-        else:
-            time.sleep(0.1)
+                    pn532.SAM_configuration()
+                    print("[NFC] PN532 re-configured")
+                except Exception as re_err:
+                    print(f"[NFC] PN532 re-configuration failed: {re_err}")
+            elif consecutive_errors in (15, 20, 25):
+                try:
+                    try:
+                        i2c.deinit()
+                    except Exception:
+                        pass
+                    i2c, pn532 = _init_pn532()
+                    print("[NFC] I2C bus and PN532 rebuilt")
+                    state.add_log("NFC reader re-initialised")
+                except Exception as re_err:
+                    print(f"[NFC] PN532 rebuild failed: {re_err}")
+            elif consecutive_errors >= 30:
+                msg = "NFC reader unrecoverable — exiting so systemd can restart the service"
+                print(f"[NFC] {msg}")
+                state.add_log(msg)
+                if log_path:
+                    write_log(log_path, msg)
+                os._exit(1)
 
-      except Exception as e:
-        print(f"[NFC] Daemon loop error (will retry): {e}")
-        state.add_log(f"NFC error (retrying): {e}")
-        time.sleep(1)
+
+def run_watchdog(state, log_path=None, stale_after=120, check_every=30):
+    """Exit the process (systemd restarts it) if the NFC daemon stops beating.
+
+    Covers the failure mode the retry loop can't: an I2C call that hangs
+    forever inside the kernel driver, freezing the daemon thread. Does
+    nothing in web-only mode (PN532 never initialised).
+    """
+    _set_thread_name("nfc-watchdog")
+    from activity_log import write_log
+
+    while True:
+        time.sleep(check_every)
+        with state._lock:
+            heartbeat = state._nfc_heartbeat
+            hw_error = state._hw_error
+        if hw_error or heartbeat is None:
+            continue
+        age = time.time() - heartbeat
+        if age > stale_after:
+            msg = f"NFC daemon heartbeat stale ({int(age)}s) — exiting so systemd can restart the service"
+            print(f"[Watchdog] {msg}")
+            if log_path:
+                write_log(log_path, msg)
+            os._exit(1)
