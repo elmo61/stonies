@@ -83,6 +83,51 @@ def scan_audiobooks(music_folder, existing_songs):
     return new_entries
 
 
+def check_self_update(base_dir):
+    """Return (can_self_update, reason) for the pending update.
+
+    The web process can update code and venv packages itself (it owns those
+    files), but it can't rewrite the systemd unit in /etc/systemd/system —
+    that needs sudo. Render origin/main's stonies.service the same way
+    update.sh does and compare it with the installed unit: if they differ,
+    the update must be applied with update.sh instead.
+    """
+    import getpass
+    import subprocess
+
+    try:
+        show = subprocess.run(
+            ["git", "show", "origin/main:stonies.service"],
+            cwd=base_dir, capture_output=True, text=True, timeout=10,
+        )
+        if show.returncode != 0:
+            return True, None  # can't tell — don't block the button
+
+        user = getpass.getuser()
+        rendered = []
+        for line in show.stdout.splitlines():
+            if line.startswith("User="):
+                line = f"User={user}"
+            elif line.startswith("WorkingDirectory="):
+                line = f"WorkingDirectory={base_dir}"
+            elif line.startswith("ExecStart="):
+                line = f"ExecStart={base_dir}/env/bin/python main.py"
+            rendered.append(line)
+
+        try:
+            with open("/etc/systemd/system/stonies.service", "r") as f:
+                installed = f.read()
+        except FileNotFoundError:
+            return True, None  # not running under systemd (dev machine)
+
+        if "\n".join(rendered).strip() != installed.strip():
+            return False, ("This update changes the background service, which "
+                           "needs admin rights — run 'bash update.sh' on the Pi instead.")
+        return True, None
+    except Exception:
+        return True, None
+
+
 def download_file(url, dest, timeout=60):
     """Download url to dest with a socket timeout. urlretrieve has no timeout —
     a peer disappearing mid-transfer used to hang the sync thread forever,
@@ -517,9 +562,58 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
                 cwd=base_dir, capture_output=True, text=True, timeout=5
             )
             behind = int(result.stdout.strip() or "0")
-            return jsonify({"updates_available": behind > 0, "commits_behind": behind})
+            can_self, reason = check_self_update(base_dir)
+            return jsonify({
+                "updates_available": behind > 0,
+                "commits_behind": behind,
+                "can_self_update": can_self,
+                "manual_reason": reason,
+            })
         except Exception as e:
             return jsonify({"error": str(e)}), 500
+
+    @app.route("/api/update/apply", methods=["POST"])
+    def update_apply():
+        """Self-update: git pull + pip install, then exit so systemd restarts
+        us on the new code (Restart=always) — no sudo needed. Refuses when the
+        update would change the systemd unit; that path needs update.sh."""
+        import subprocess
+        import sys
+
+        can_self, reason = check_self_update(base_dir)
+        if not can_self:
+            return jsonify({"error": reason}), 409
+
+        pull = subprocess.run(
+            ["git", "pull", "--ff-only"],
+            cwd=base_dir, capture_output=True, text=True, timeout=120,
+        )
+        if pull.returncode != 0:
+            detail = (pull.stderr or pull.stdout).strip()
+            return jsonify({"error": f"git pull failed: {detail}"}), 500
+
+        pip = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "-q", "--upgrade", "-r",
+             os.path.join(base_dir, "requirements.txt")],
+            cwd=base_dir, capture_output=True, text=True, timeout=600,
+        )
+        if pip.returncode != 0:
+            detail = (pip.stderr or pip.stdout).strip()
+            return jsonify({"error": f"pip install failed: {detail}"}), 500
+
+        head = subprocess.run(
+            ["git", "log", "-1", "--pretty=%h %s"],
+            cwd=base_dir, capture_output=True, text=True, timeout=5,
+        )
+        version = head.stdout.strip()
+        state.add_log(f"Update applied ({version}) — restarting")
+        if log_path:
+            write_log(log_path, f"Update applied ({version}) — restarting")
+
+        # Exit after the response has flushed; systemd restarts the service
+        # with the freshly pulled code
+        threading.Timer(2.0, lambda: os._exit(0)).start()
+        return jsonify({"ok": True, "restarting": True, "version": version})
 
     # ------------------------------------------------------------------
     # Import scan

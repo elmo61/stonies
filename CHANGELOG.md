@@ -19,6 +19,7 @@ Fixes for the "works for a week, then needs a reboot" class of failures: leaked 
 - **NFC heartbeat watchdog** — restarts the service if the NFC loop hangs inside an I2C call (a failure mode the retry loop can't see).
 - **Atomic JSON writes** (`storage.py`) — `songs.json` and `config.json` are written via temp-file-and-rename so they can never be left half-written by a power cut.
 - **Activity log cap** — `activity.log` is trimmed to its most recent lines once it passes 1 MB, instead of growing forever.
+- **One-click updates from the UI** — the update badge is now an **⬆️ Update now** button. It pulls the latest code, installs new Python packages into the venv, then exits so systemd restarts the service on the new code — no SSH or sudo needed. If an update would change the systemd service file (which does need sudo), the UI detects this and tells you to run `update.sh` instead.
 - **`update.sh`** — one-command updater for existing installs: pulls the latest code, installs new Python packages, refreshes the systemd service file if it changed, and restarts. Previously new dependencies and service changes only reached fresh installs via `setup.sh`.
 - **`requirements.txt`** — single source of truth for Python dependencies, used by both `setup.sh` and `update.sh`.
 - README: *Reliability* and *Updating* sections, plus an I2C clock-stretching troubleshooting note for flaky readers.

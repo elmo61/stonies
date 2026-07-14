@@ -101,14 +101,16 @@ See [INSTALL.md](INSTALL.md) for manual steps and troubleshooting.
 
 ## Updating an existing install
 
-When the UI shows the update badge (or any time you like), SSH to the Pi and run:
+When an update is available the settings bar shows an **⬆️ Update now** button — click it and Stonies pulls the latest code, installs any new Python packages, and restarts itself (about 30 seconds; anything already playing on the speaker keeps playing). No SSH needed.
+
+The button works without admin rights because it only touches files the app owns, then simply exits and lets systemd restart it on the new code. The one thing it *can't* do is rewrite the systemd service file — that needs sudo. When an update includes a service change, the UI detects it and shows **"Update available — run update.sh"** instead. In that case, SSH to the Pi and run:
 
 ```bash
 cd stonies/projects/stonies
 bash update.sh
 ```
 
-One command does everything: pulls the latest code, installs any new Python packages from `requirements.txt`, refreshes the systemd service file if it changed, and restarts Stonies. It only touches what actually differs, so it's safe to run repeatedly. Your library (`music/`, `songs.json`, `config.json`) is never affected.
+`update.sh` does everything the button does plus the service file refresh. It only touches what actually differs, so it's safe to run repeatedly. Either way, your library (`music/`, `songs.json`, `config.json`) is never affected.
 
 ---
 
@@ -196,7 +198,8 @@ config.json           Speaker + sleep timer config (gitignored)
 | POST | `/api/sync/pull` | Pull missing songs from a peer device |
 | GET | `/api/sync/status` | Sync job progress |
 | GET | `/api/disk` | Disk usage of the music folder |
-| GET | `/api/update/status` | Check for available git updates |
+| GET | `/api/update/status` | Check for available git updates + whether they can be self-applied |
+| POST | `/api/update/apply` | Self-update: pull, install deps, restart (409 if the update needs `update.sh`) |
 
 ---
 

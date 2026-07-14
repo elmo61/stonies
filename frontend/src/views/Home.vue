@@ -79,14 +79,37 @@
             <span v-else class="has-text-grey-light is-hidden-mobile">🌙 Sleep timer off</span>
           </div>
           <div class="level-right" style="gap: 0.5rem;">
-            <span v-if="updateAvailable" class="tag is-warning" :title="`${updateCommits} commit${updateCommits !== 1 ? 's' : ''} behind origin/main`">
-              ⬆️ Update available
+            <button
+              v-if="updateAvailable && canSelfUpdate"
+              class="button is-warning is-small"
+              :class="{'is-loading': updateApplying}"
+              :disabled="updateApplying"
+              @click="applyUpdate"
+              :title="`${updateCommits} commit${updateCommits !== 1 ? 's' : ''} behind origin/main`"
+            >
+              ⬆️ Update now
+            </button>
+            <span
+              v-else-if="updateAvailable"
+              class="tag is-warning"
+              :title="updateManualReason || 'Run: bash update.sh on the Pi'"
+            >
+              ⬆️ Update available — run update.sh
             </span>
             <button class="button is-light is-small" @click="openSettings" title="Settings">
               ⚙️ Settings
             </button>
           </div>
         </div>
+      </div>
+
+      <!-- Update progress / result banner -->
+      <div v-if="updateApplying" class="notification is-info is-light mb-4 py-2 px-4">
+        <span class="spin">⟳</span> {{ updateMessage }}
+      </div>
+      <div v-else-if="updateError" class="notification is-danger is-light mb-4 py-2 px-4">
+        <button class="delete" @click="updateError = ''"></button>
+        Update failed: {{ updateError }}
       </div>
 
       <!-- Song library box -->
@@ -788,6 +811,11 @@ const scanResult = ref(null)
 
 const updateAvailable = ref(false)
 const updateCommits = ref(0)
+const canSelfUpdate = ref(true)
+const updateManualReason = ref('')
+const updateApplying = ref(false)
+const updateMessage = ref('')
+const updateError = ref('')
 
 async function checkForUpdates() {
   try {
@@ -796,8 +824,44 @@ async function checkForUpdates() {
     if (!data.error) {
       updateAvailable.value = data.updates_available
       updateCommits.value = data.commits_behind
+      canSelfUpdate.value = data.can_self_update !== false
+      updateManualReason.value = data.manual_reason || ''
     }
   } catch (_) {}
+}
+
+async function applyUpdate() {
+  if (updateApplying.value) return
+  if (!confirm('Update Stonies now? The app restarts and is unavailable for about 30 seconds. Anything already playing on the speaker keeps playing.')) return
+  updateApplying.value = true
+  updateError.value = ''
+  updateMessage.value = 'Downloading and installing update…'
+  try {
+    const res = await fetch(`${API}/update/apply`, { method: 'POST' })
+    const data = await res.json()
+    if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`)
+    updateMessage.value = 'Update installed — restarting Stonies…'
+    await waitForRestart()
+    location.reload()
+  } catch (e) {
+    updateError.value = e.message
+    updateApplying.value = false
+    updateMessage.value = ''
+  }
+}
+
+async function waitForRestart() {
+  // Give the server a moment to go down, then poll until it's back (max 2 min)
+  await new Promise(r => setTimeout(r, 5000))
+  const deadline = Date.now() + 120000
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(`${API}/nfc/status`, { cache: 'no-store' })
+      if (res.ok) return
+    } catch (_) {}
+    await new Promise(r => setTimeout(r, 3000))
+  }
+  throw new Error('Stonies did not come back after the update — check the Pi with: journalctl -u stonies -n 50')
 }
 
 async function scanImports() {
