@@ -55,14 +55,15 @@ source env/bin/activate
 ### 5. Install Python packages
 
 ```bash
-pip install flask flask-cors pychromecast RPi.GPIO adafruit-blinka adafruit-circuitpython-pn532
+pip install -r requirements.txt
 ```
 
 | Package | Purpose |
 |---|---|
-| `flask` | Web server |
+| `flask` | Web framework + REST API |
 | `flask-cors` | CORS headers for the API |
-| `pychromecast` | Discover and cast to Google speakers |
+| `waitress` | Production WSGI server (bounded thread pool) |
+| `pychromecast` | Discover and cast to Google speakers (pinned to tested majors) |
 | `RPi.GPIO` | GPIO access (required by adafruit-blinka) |
 | `adafruit-blinka` | CircuitPython hardware abstraction layer |
 | `adafruit-circuitpython-pn532` | PN532 NFC reader driver over I2C |
@@ -75,6 +76,17 @@ python main.py
 ```
 
 Open `http://<pi-ip>:5000` in a browser on any device on the same network.
+
+---
+
+## Updating an existing install
+
+```bash
+cd stonies/projects/stonies
+bash update.sh
+```
+
+The script pulls the latest code, installs any new Python packages, refreshes the systemd service file if it changed, and restarts Stonies. It's idempotent — running it when nothing changed is harmless. `setup.sh` uses the same script internally, so fresh installs and updates can never drift apart.
 
 ---
 
@@ -100,7 +112,13 @@ i2cdetect -y 1  # should show '24' or '48' in the grid
 
 ## Auto-start on boot (systemd)
 
-The `setup.sh` script does this automatically. For a manual install, copy the included service file:
+The `setup.sh` script does this automatically. For a manual install, the easiest way is to let the updater render and install the service file for your user and clone location:
+
+```bash
+bash update.sh --skip-pull
+```
+
+Or copy the included template by hand — note it assumes the app lives at `/home/pi/stonies`, so edit `User=`, `WorkingDirectory=`, and `ExecStart=` if yours differs:
 
 ```bash
 sudo cp stonies.service /etc/systemd/system/

@@ -99,6 +99,19 @@ See [INSTALL.md](INSTALL.md) for manual steps and troubleshooting.
 
 ---
 
+## Updating an existing install
+
+When the UI shows the update badge (or any time you like), SSH to the Pi and run:
+
+```bash
+cd stonies/projects/stonies
+bash update.sh
+```
+
+One command does everything: pulls the latest code, installs any new Python packages from `requirements.txt`, refreshes the systemd service file if it changed, and restarts Stonies. It only touches what actually differs, so it's safe to run repeatedly. Your library (`music/`, `songs.json`, `config.json`) is never affected.
+
+---
+
 ## Usage
 
 ### First-time setup
@@ -134,6 +147,8 @@ cast_monitor.py       Event-driven Chromecast status listener + position saver
 activity_log.py       Persistent activity log helpers (size-capped)
 storage.py            Atomic JSON write helper for songs.json / config.json
 setup.sh              One-shot install script for a fresh Pi
+update.sh             In-place updater for existing installs (code + deps + service)
+requirements.txt      Python dependencies (single source for setup.sh / update.sh)
 INSTALL.md            Manual install guide
 frontend/
   src/
