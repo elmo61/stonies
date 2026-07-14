@@ -31,10 +31,12 @@ python3 -m venv "$APP_DIR/env"
 # ── 4. Python packages ──────────────────────────────────────────────────────
 echo ">>> [4/5] Installing Python packages (this may take a minute)..."
 "$APP_DIR/env/bin/pip" install --upgrade pip -q
+# pychromecast is pinned to the tested major range — its API moves between majors
 "$APP_DIR/env/bin/pip" install \
     flask \
     flask-cors \
-    pychromecast \
+    waitress \
+    'pychromecast>=13,<15' \
     RPi.GPIO \
     adafruit-blinka \
     adafruit-circuitpython-pn532
@@ -44,7 +46,8 @@ echo ">>> [5/5] Installing systemd service..."
 sudo tee /etc/systemd/system/stonies.service > /dev/null <<EOF
 [Unit]
 Description=Stonies NFC Music Player
-After=network.target
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 User=$SERVICE_USER

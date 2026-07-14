@@ -1,6 +1,9 @@
 [Unit]
 Description=Stonies NFC music player
-After=network.target
+# network-online (not just network) — otherwise the service can start before
+# the Pi has an IP and resolve its own address as 127.0.0.1
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 User=pi
