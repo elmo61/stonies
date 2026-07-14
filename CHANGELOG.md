@@ -4,6 +4,33 @@ All notable changes to Stonies are documented here, newest first.
 
 ---
 
+## 2026-07-14 — Long-run reliability
+
+Fixes for the "works for a week, then needs a reboot" class of failures: leaked Chromecast connections slowly exhausting the process, and a wedged NFC reader staying dead until power cycle.
+
+### Fixed
+- **Chromecast connection leak** — when the speaker connection dropped (speaker reboot, Wi-Fi blip), the monitor abandoned the connection without closing it; pychromecast then retried it forever in a background thread. These orphaned threads accumulated over days until the whole web app stopped responding. Dropped connections are now properly disconnected on the monitor thread.
+- **Discovery (zeroconf) leak** — every cast operation created a fresh discovery browser (~5 threads + multicast sockets) that leaked whenever connecting to the speaker failed. All speaker lookups now go through a single `find_cast()` helper that always stops discovery, even on failure, and bounds connection retries.
+- **Corrupt `songs.json` no longer destroys the library** — a corrupt file (e.g. after a power cut mid-write) used to be treated as an empty library and regenerated with brand-new song IDs, silently orphaning every written NFC tag. It is now reported as an error and left untouched.
+- **Sync could hang forever** — peer downloads had no timeout; a peer disappearing mid-transfer left the sync job stuck on "running" until the next restart.
+
+### Added
+- **Self-healing NFC daemon** — on repeated reader errors the daemon now re-configures the PN532, then rebuilds the I2C bus from scratch, and as a last resort exits so systemd restarts the service clean. Previously a wedged reader/bus was retried with the same dead handle forever and stayed down until reboot.
+- **NFC heartbeat watchdog** — restarts the service if the NFC loop hangs inside an I2C call (a failure mode the retry loop can't see).
+- **Atomic JSON writes** (`storage.py`) — `songs.json` and `config.json` are written via temp-file-and-rename so they can never be left half-written by a power cut.
+- **Activity log cap** — `activity.log` is trimmed to its most recent lines once it passes 1 MB, instead of growing forever.
+- README: *Reliability* section and an I2C clock-stretching troubleshooting note for flaky readers.
+
+### Changed
+- Server now runs under **waitress** (bounded thread pool) instead of the Flask dev server; falls back to the dev server if waitress isn't installed.
+- systemd unit waits for `network-online.target` so the service can't start before the Pi has an IP.
+- `pychromecast` pinned to the tested major range in `setup.sh`; `waitress` added to dependencies.
+- Audiobook position saves throttled from every 30 s to every 60 s to halve SD-card writes during playback.
+- Repeated NFC errors log once to the activity feed instead of once per second.
+- Removed dead code: the never-started fallback position tracker thread and an unused event in `NFCState`.
+
+---
+
 ## 2026-03-24 — On-device player bar
 
 ### Added
