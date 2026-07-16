@@ -7,7 +7,7 @@ notifications from the Chromecast while connected — no polling.
 
 Responsibilities:
   - Log "finished" and "stopped" events to activity.log
-  - Save audiobook position every 30 s during playback (push-driven)
+  - Save audiobook position every 60 s during playback (push-driven)
   - Detect end-of-audiobook (last chapter FINISHED) and clear saved progress
   - Update NFCState when playback ends (naturally, cancelled, or speaker lost)
 """
@@ -16,6 +16,8 @@ import time
 import threading
 from datetime import datetime
 from urllib.parse import unquote, urlparse
+
+from storage import save_json
 
 
 class _MediaListener:
@@ -61,6 +63,8 @@ class CastMonitor:
         self._last_position_save = 0
         self._play_event = threading.Event()
         self._pending_speaker = ""
+        self._dead_casts = []          # casts whose connection dropped, awaiting cleanup
+        self._dead_lock = threading.Lock()
 
     def start(self):
         t = threading.Thread(target=self._run, daemon=True, name="cast-monitor")
@@ -87,6 +91,8 @@ class CastMonitor:
             # only runs once per signal, never spins.
             self._play_event.wait()
             self._play_event.clear()
+
+            self._reap_dead_casts()
 
             try:
                 speaker = self._pending_speaker
@@ -121,19 +127,10 @@ class CastMonitor:
             return ""
 
     def _connect(self, speaker_name):
-        import pychromecast
+        from nfc_daemon import find_cast
         print(f"[Monitor] Connecting to '{speaker_name}'...")
         try:
-            chromecasts, browser = pychromecast.get_listed_chromecasts(
-                friendly_names=[speaker_name]
-            )
-            if not chromecasts:
-                pychromecast.discovery.stop_discovery(browser)
-                print(f"[Monitor] Speaker '{speaker_name}' not found")
-                return
-            cast = chromecasts[0]
-            cast.wait(timeout=10)
-            pychromecast.discovery.stop_discovery(browser)
+            cast = find_cast(speaker_name)
             cast.media_controller.register_status_listener(
                 _MediaListener(self._on_media_status)
             )
@@ -157,14 +154,41 @@ class CastMonitor:
             except Exception:
                 pass
 
+    def _reap_dead_casts(self):
+        """Disconnect casts whose connection dropped (see _on_connection_lost).
+
+        Must run on the monitor thread: pychromecast fires the lost callback
+        on the socket client's own thread, and disconnect() joins that
+        thread — calling it from the callback would deadlock.
+        """
+        with self._dead_lock:
+            dead, self._dead_casts = self._dead_casts, []
+        for cast in dead:
+            try:
+                cast.disconnect()
+            except Exception:
+                pass
+        if dead:
+            print(f"[Monitor] Cleaned up {len(dead)} dropped connection(s)")
+
     def _on_connection_lost(self):
         """Called by _ConnectionListener when the socket to the speaker drops."""
         print("[Monitor] Speaker connection lost unexpectedly")
         self._state.set_playing(False)
-        # Clear the cast ref without calling disconnect (socket already gone)
+        # Queue the cast for cleanup on the monitor thread. Just dropping the
+        # reference is not enough: pychromecast's socket client keeps
+        # retrying the connection forever until disconnect() is called, and
+        # those orphaned threads used to pile up until the whole process ran
+        # out of resources.
+        cast = self._cast
         self._cast = None
         self._connected_speaker = None
         self._last_player_state = None
+        if cast:
+            with self._dead_lock:
+                self._dead_casts.append(cast)
+            self._pending_speaker = ""   # wake for cleanup only, no reconnect
+            self._play_event.set()
 
     # ------------------------------------------------------------------
     # Media status callback (runs on pychromecast socket thread)
@@ -209,11 +233,12 @@ class CastMonitor:
                     write_log(self._log_path, f'"{song_name}" stopped')
                     self._state.set_playing(False)
 
-        # Throttled position save for audiobooks while playing/paused
+        # Throttled position save for audiobooks while playing/paused.
+        # 60 s keeps SD-card writes down; resume position is coarse anyway.
         if (player_state in ("PLAYING", "PAUSED")
                 and song and song.get("type") == "audiobook"):
             now = time.time()
-            if now - self._last_position_save >= 30:
+            if now - self._last_position_save >= 60:
                 self._last_position_save = now
                 self._save_progress(song_id, song, chapter_index, current_time, content_id)
 
@@ -256,8 +281,7 @@ class CastMonitor:
                     if s.get("id") == song_id:
                         s.pop("progress", None)
                         break
-                with open(self._songs_path, "w") as f:
-                    json.dump(songs, f, indent=2)
+                save_json(self._songs_path, songs)
             except Exception:
                 pass
 
@@ -292,7 +316,6 @@ class CastMonitor:
                             progress["chapter_index"] = chapter_index
                         s["progress"] = progress
                         break
-                with open(self._songs_path, "w") as f:
-                    json.dump(songs, f, indent=2)
+                save_json(self._songs_path, songs)
             except Exception:
                 pass

@@ -1,0 +1,10 @@
+# Stonies Python dependencies — installed by setup.sh and update.sh.
+# Keep this as the single source of truth; don't list packages in scripts.
+flask
+flask-cors
+waitress
+# pychromecast is pinned to the tested major range — its API moves between majors
+pychromecast>=13,<15
+RPi.GPIO
+adafruit-blinka
+adafruit-circuitpython-pn532

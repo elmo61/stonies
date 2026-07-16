@@ -16,50 +16,22 @@ echo "  User    : $SERVICE_USER"
 echo ""
 
 # ── 1. System packages ──────────────────────────────────────────────────────
-echo ">>> [1/5] Installing system packages..."
+echo ">>> [1/4] Installing system packages..."
 sudo apt-get update -qq
 sudo apt-get install -y python3-dev python3-venv i2c-tools
 
 # ── 2. Enable I2C ───────────────────────────────────────────────────────────
-echo ">>> [2/5] Enabling I2C..."
+echo ">>> [2/4] Enabling I2C..."
 sudo raspi-config nonint do_i2c 0
 
 # ── 3. Python virtual environment ───────────────────────────────────────────
-echo ">>> [3/5] Creating Python venv..."
+echo ">>> [3/4] Creating Python venv..."
 python3 -m venv "$APP_DIR/env"
-
-# ── 4. Python packages ──────────────────────────────────────────────────────
-echo ">>> [4/5] Installing Python packages (this may take a minute)..."
 "$APP_DIR/env/bin/pip" install --upgrade pip -q
-"$APP_DIR/env/bin/pip" install \
-    flask \
-    flask-cors \
-    pychromecast \
-    RPi.GPIO \
-    adafruit-blinka \
-    adafruit-circuitpython-pn532
 
-# ── 5. Systemd service ──────────────────────────────────────────────────────
-echo ">>> [5/5] Installing systemd service..."
-sudo tee /etc/systemd/system/stonies.service > /dev/null <<EOF
-[Unit]
-Description=Stonies NFC Music Player
-After=network.target
-
-[Service]
-User=$SERVICE_USER
-WorkingDirectory=$APP_DIR
-ExecStart=$APP_DIR/env/bin/python main.py
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-sudo systemctl daemon-reload
-sudo systemctl enable stonies
-sudo systemctl restart stonies
+# ── 4. Packages + systemd service (shared with update.sh) ───────────────────
+echo ">>> [4/4] Installing packages and service (this may take a minute)..."
+bash "$APP_DIR/update.sh" --skip-pull
 
 # ── Done ────────────────────────────────────────────────────────────────────
 PI_IP=$(hostname -I | awk '{print $1}')

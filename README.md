@@ -73,6 +73,14 @@ When you add a new track or audiobook via the UI:
 
 > **Note:** If your PN532 module has DIP switches, set both to OFF for I2C mode. Modules often ship set to UART or SPI.
 
+### Flaky reader? (I2C clock stretching)
+
+The PN532 uses I2C clock stretching, which the Pi's I2C controller implements incorrectly — combined with long or marginal wiring this causes intermittent bus errors. The app now recovers from these automatically (see *Reliability* below), but if the reader is frequently dropping out you can also slow the bus down, which makes the hardware itself far more tolerant. Add to `/boot/config.txt` (or `/boot/firmware/config.txt` on newer OS images) and reboot:
+
+```
+dtparam=i2c_arm_baudrate=10000
+```
+
 ---
 
 ## Quick start (fresh Raspberry Pi)
@@ -88,6 +96,34 @@ The script installs all system dependencies, enables I2C, creates a Python venv,
 Open `http://<pi-ip>:5000` in a browser on any device on the same network.
 
 See [INSTALL.md](INSTALL.md) for manual steps and troubleshooting.
+
+---
+
+## Updating an existing install
+
+When an update is available the settings bar shows an **⬆️ Update now** button — click it and Stonies pulls the latest code, installs any new Python packages, and restarts itself (about 30 seconds; anything already playing on the speaker keeps playing). No SSH needed.
+
+The button works without admin rights because it only touches files the app owns, then simply exits and lets systemd restart it on the new code. The one thing it *can't* do is rewrite the systemd service file — that needs sudo. When an update includes a service change, the UI detects it and shows **"Update available — run update.sh"** instead. In that case, SSH to the Pi and run:
+
+```bash
+cd stonies/projects/stonies
+bash update.sh
+```
+
+`update.sh` does everything the button does plus the service file refresh. It only touches what actually differs, so it's safe to run repeatedly. Either way, your library (`music/`, `songs.json`, `config.json`) is never affected.
+
+### Release channels
+
+Settings → **🧪 Release Channel** picks which releases the device follows:
+
+| Channel | Git branch | Who it's for |
+|---|---|---|
+| **Stable** (default) | `main` | Everyday devices — tested releases only |
+| **Beta** | `beta` | Try new features first; may be rough |
+
+Switching channel is itself just an update: pick the channel, and if that channel's version differs from what's running, the **⬆️ Update now** button appears — including when moving *back* from beta to stable (a safe downgrade; your library is untouched). `update.sh` follows the same channel setting.
+
+**Release workflow (for maintainers):** merge feature branches into `beta`; beta devices pick them up. When beta has proven itself, merge `beta` into `main` and stable devices see the update. Optionally tag main releases (`git tag v1.x && git push --tags`) as human-readable markers — devices don't use tags.
 
 ---
 
@@ -119,12 +155,15 @@ Click **⇄ Sync Device**, enter the hostname of another Stonies Pi on your netw
 ## File structure
 
 ```
-main.py               Entry point — wires state, starts daemon thread, runs Flask
-nfc_daemon.py         NFCState class + NFC read/write helpers + background loop
+main.py               Entry point — wires state, starts daemon + watchdog threads, runs the server
+nfc_daemon.py         NFCState class + NFC read/write helpers + self-healing background loop
 api.py                Flask REST API (factory pattern via create_app())
 cast_monitor.py       Event-driven Chromecast status listener + position saver
-activity_log.py       Persistent activity log helpers
+activity_log.py       Persistent activity log helpers (size-capped)
+storage.py            Atomic JSON write helper for songs.json / config.json
 setup.sh              One-shot install script for a fresh Pi
+update.sh             In-place updater for existing installs (code + deps + service)
+requirements.txt      Python dependencies (single source for setup.sh / update.sh)
 INSTALL.md            Manual install guide
 frontend/
   src/
@@ -172,7 +211,8 @@ config.json           Speaker + sleep timer config (gitignored)
 | POST | `/api/sync/pull` | Pull missing songs from a peer device |
 | GET | `/api/sync/status` | Sync job progress |
 | GET | `/api/disk` | Disk usage of the music folder |
-| GET | `/api/update/status` | Check for available git updates |
+| GET | `/api/update/status` | Update check for the configured channel: availability, version, self-apply eligibility |
+| POST | `/api/update/apply` | Self-update to the channel's branch: sync, install deps, restart (409 if it needs `update.sh`) |
 
 ---
 
@@ -196,6 +236,21 @@ By default Stonies uses a registered Cast Web Receiver app (`A0D905F0`) which se
 | `"A0D905F0"` | Default — uses the Stonies Cast receiver (recommended) |
 | `"YOUR_APP_ID"` | Use your own registered Cast receiver app |
 | `null` | Fall back to the Default Media Receiver (no continuous position tracking) |
+
+---
+
+## Reliability
+
+Stonies is designed to run unattended for months. The moving parts:
+
+- **Self-healing NFC daemon** — on repeated reader errors the daemon re-configures the PN532, then rebuilds the whole I2C bus, and as a last resort exits so systemd restarts the service in a clean state. A glitching reader recovers in seconds instead of staying dead until a reboot.
+- **Heartbeat watchdog** — a separate thread restarts the service if the NFC loop ever hangs inside an I2C call (`nfc_heartbeat_age` in `/api/nfc/status` exposes the same signal to the UI).
+- **Bounded Chromecast lifecycles** — every speaker discovery/connection goes through one helper that always stops discovery and never leaves a connection retrying in the background, so long uptimes don't accumulate leaked threads and sockets.
+- **Atomic saves** — `songs.json` and `config.json` are written via temp-file-and-rename, so a power cut can't corrupt the library (which would orphan every written NFC tag). A corrupt `songs.json` is reported, never silently regenerated.
+- **Bounded server** — runs under waitress with a fixed thread pool (falls back to the Flask dev server if waitress isn't installed).
+- **Capped activity log** — `activity.log` is trimmed automatically so it can't grow without bound.
+
+If things ever look stuck, `sudo systemctl restart stonies` beats a reboot — and if NFC only recovers after a full power cycle, suspect the reader's wiring/power rather than software.
 
 ---
 

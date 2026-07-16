@@ -14,11 +14,15 @@ from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
-from nfc_daemon import cast_audiobook, cast_song, lookup_song, check_and_schedule_sleep, update_play_stats
+from nfc_daemon import cast_audiobook, cast_song, find_cast, lookup_song, check_and_schedule_sleep, update_play_stats
 from activity_log import write_log
+from storage import save_json
 
 
 AUDIO_EXTS = (".mp3", ".m4a")
+
+# Release channels: which git branch each channel follows
+CHANNEL_BRANCHES = {"stable": "main", "beta": "beta"}
 
 
 def derive_track_name(filename):
@@ -80,6 +84,59 @@ def scan_audiobooks(music_folder, existing_songs):
         })
 
     return new_entries
+
+
+def check_self_update(base_dir, branch="main"):
+    """Return (can_self_update, reason) for the pending update on branch.
+
+    The web process can update code and venv packages itself (it owns those
+    files), but it can't rewrite the systemd unit in /etc/systemd/system —
+    that needs sudo. Render the incoming branch's stonies.service the same
+    way update.sh does and compare it with the installed unit: if they
+    differ, the update must be applied with update.sh instead.
+    """
+    import getpass
+    import subprocess
+
+    try:
+        show = subprocess.run(
+            ["git", "show", f"origin/{branch}:stonies.service"],
+            cwd=base_dir, capture_output=True, text=True, timeout=10,
+        )
+        if show.returncode != 0:
+            return True, None  # can't tell — don't block the button
+
+        user = getpass.getuser()
+        rendered = []
+        for line in show.stdout.splitlines():
+            if line.startswith("User="):
+                line = f"User={user}"
+            elif line.startswith("WorkingDirectory="):
+                line = f"WorkingDirectory={base_dir}"
+            elif line.startswith("ExecStart="):
+                line = f"ExecStart={base_dir}/env/bin/python main.py"
+            rendered.append(line)
+
+        try:
+            with open("/etc/systemd/system/stonies.service", "r") as f:
+                installed = f.read()
+        except FileNotFoundError:
+            return True, None  # not running under systemd (dev machine)
+
+        if "\n".join(rendered).strip() != installed.strip():
+            return False, ("This update changes the background service, which "
+                           "needs admin rights — run 'bash update.sh' on the Pi instead.")
+        return True, None
+    except Exception:
+        return True, None
+
+
+def download_file(url, dest, timeout=60):
+    """Download url to dest with a socket timeout. urlretrieve has no timeout —
+    a peer disappearing mid-transfer used to hang the sync thread forever,
+    leaving the job stuck on "running" until the next restart."""
+    with urllib.request.urlopen(url, timeout=timeout) as resp, open(dest, "wb") as out:
+        shutil.copyfileobj(resp, out)
 
 
 def run_sync(peer_hostname, pi_ip, songs_path, songs_lock, music_folder,
@@ -151,7 +208,7 @@ def run_sync(peer_hostname, pi_ip, songs_path, songs_lock, music_folder,
                 if peer_img and "/images/" in peer_img:
                     img_filename = peer_img.rsplit("/images/", 1)[-1]
                     local_img = os.path.join(images_folder, img_filename)
-                    urllib.request.urlretrieve(
+                    download_file(
                         f"{peer_url}/images/{url_quote(img_filename)}", local_img
                     )
                     song_copy["image_url"] = f"http://{pi_ip}:5000/images/{img_filename}"
@@ -163,7 +220,7 @@ def run_sync(peer_hostname, pi_ip, songs_path, songs_lock, music_folder,
                     os.makedirs(folder_path, exist_ok=True)
                     for ch in chapters:
                         ch_file = ch["filename"]
-                        urllib.request.urlretrieve(
+                        download_file(
                             f"{peer_url}/music/{url_quote(folder)}/{url_quote(ch_file)}",
                             os.path.join(folder_path, ch_file),
                         )
@@ -174,7 +231,7 @@ def run_sync(peer_hostname, pi_ip, songs_path, songs_lock, music_folder,
                     ]
                 else:
                     filename = song.get("filename", "")
-                    urllib.request.urlretrieve(
+                    download_file(
                         f"{peer_url}/music/{url_quote(filename)}",
                         os.path.join(music_folder, filename),
                     )
@@ -187,8 +244,7 @@ def run_sync(peer_hostname, pi_ip, songs_path, songs_lock, music_folder,
                     # Double-check it still doesn't exist (race safety)
                     if not any(s["id"] == song_id for s in songs):
                         songs.append(song_copy)
-                        with open(songs_path, "w") as f:
-                            json.dump(songs, f, indent=2)
+                        save_json(songs_path, songs)
 
                 pulled.append(song_name)
 
@@ -294,8 +350,11 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
         body = request.get_json(silent=True) or {}
         speaker = body.get("speaker", "").strip()
         sleep_timer = body.get("sleep_timer")
-        if not speaker and sleep_timer is None:
+        update_channel = body.get("update_channel")
+        if not speaker and sleep_timer is None and update_channel is None:
             return jsonify({"error": "Nothing to save"}), 400
+        if update_channel is not None and update_channel not in CHANNEL_BRANCHES:
+            return jsonify({"error": "update_channel must be 'stable' or 'beta'"}), 400
         with config_lock:
             try:
                 with open(config_path, "r") as f:
@@ -306,10 +365,12 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
                 existing["speaker"] = speaker
             if sleep_timer is not None:
                 existing["sleep_timer"] = sleep_timer
-            with open(config_path, "w") as f:
-                json.dump(existing, f, indent=2)
+            if update_channel is not None:
+                existing["update_channel"] = update_channel
+            save_json(config_path, existing)
         return jsonify({"ok": True, "speaker": existing.get("speaker", ""),
-                        "sleep_timer": existing.get("sleep_timer")})
+                        "sleep_timer": existing.get("sleep_timer"),
+                        "update_channel": existing.get("update_channel")})
 
     # ------------------------------------------------------------------
     # Songs
@@ -321,13 +382,18 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
             try:
                 with open(songs_path, "r") as f:
                     songs = json.load(f)
-            except Exception:
+            except FileNotFoundError:
                 songs = []
+            except Exception as e:
+                # A corrupt songs.json must never be treated as an empty
+                # library — the rescan below would regenerate every song ID
+                # and silently orphan all written NFC tags.
+                state.add_log(f"songs.json unreadable: {e}")
+                return jsonify({"error": f"songs.json unreadable: {e}", "songs": []}), 500
             new_audiobooks = scan_audiobooks(music_folder, songs)
             if new_audiobooks:
                 songs.extend(new_audiobooks)
-                with open(songs_path, "w") as f:
-                    json.dump(songs, f, indent=2)
+                save_json(songs_path, songs)
         return jsonify({"songs": songs})
 
     @app.route("/api/songs", methods=["POST"])
@@ -409,8 +475,7 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
             except Exception:
                 songs = []
             songs.append(song)
-            with open(songs_path, "w") as f:
-                json.dump(songs, f, indent=2)
+            save_json(songs_path, songs)
 
         # Only request NFC write if the hardware is available
         if not state._hw_error:
@@ -437,8 +502,7 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
                     break
             else:
                 return jsonify({"error": "Song not found"}), 404
-            with open(songs_path, "w") as f:
-                json.dump(songs, f, indent=2)
+            save_json(songs_path, songs)
         return jsonify({"ok": True, "name": name})
 
     @app.route("/api/songs/<song_id>/progress", methods=["DELETE"])
@@ -455,8 +519,7 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
                     break
             else:
                 return jsonify({"error": "Song not found"}), 404
-            with open(songs_path, "w") as f:
-                json.dump(songs, f, indent=2)
+            save_json(songs_path, songs)
         return jsonify({"ok": True})
 
     @app.route("/api/songs/<song_id>", methods=["DELETE"])
@@ -473,8 +536,7 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
                 if s.get("id") == song_id:
                     removed = s
                     break
-            with open(songs_path, "w") as f:
-                json.dump(updated, f, indent=2)
+            save_json(songs_path, updated)
 
         if removed:
             if removed.get("type") == "audiobook":
@@ -499,19 +561,125 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
     # Update / deploy
     # ------------------------------------------------------------------
 
+    def _current_channel():
+        """Effective release channel: config value if set, else auto-detected
+        from the checked-out branch — a device deployed straight onto the
+        beta branch must not default to stable and offer itself a downgrade."""
+        import subprocess
+        with config_lock:
+            try:
+                with open(config_path, "r") as f:
+                    cfg = json.load(f)
+            except Exception:
+                cfg = {}
+        channel = cfg.get("update_channel")
+        if channel in CHANNEL_BRANCHES:
+            return channel
+        try:
+            head = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                cwd=base_dir, capture_output=True, text=True, timeout=5,
+            ).stdout.strip()
+        except Exception:
+            head = ""
+        return "beta" if head == "beta" else "stable"
+
     @app.route("/api/update/status", methods=["GET"])
     def update_status():
         import subprocess
+
+        def _git(*args, timeout=10):
+            return subprocess.run(["git", *args], cwd=base_dir,
+                                  capture_output=True, text=True, timeout=timeout)
+
         try:
-            subprocess.run(["git", "fetch"], cwd=base_dir, capture_output=True, timeout=10)
-            result = subprocess.run(
-                ["git", "rev-list", "HEAD..origin/main", "--count"],
-                cwd=base_dir, capture_output=True, text=True, timeout=5
-            )
-            behind = int(result.stdout.strip() or "0")
-            return jsonify({"updates_available": behind > 0, "commits_behind": behind})
+            channel = _current_channel()
+            branch = CHANNEL_BRANCHES[channel]
+            _git("fetch", timeout=15)
+            version = _git("log", "-1", "--pretty=%h %s", timeout=5).stdout.strip()
+            head = _git("rev-parse", "HEAD", timeout=5).stdout.strip()
+            target_res = _git("rev-parse", f"origin/{branch}", timeout=5)
+            if target_res.returncode != 0:
+                return jsonify({
+                    "updates_available": False, "commits_behind": 0,
+                    "channel": channel, "branch": branch,
+                    "current_version": version,
+                    "can_self_update": True, "manual_reason": None,
+                    "note": f"Branch '{branch}' not found on origin",
+                })
+            behind_res = _git("rev-list", f"HEAD..origin/{branch}", "--count", timeout=5)
+            behind = int(behind_res.stdout.strip() or "0")
+            can_self, reason = check_self_update(base_dir, branch)
+            return jsonify({
+                # HEAD != target also covers channel switches, where the new
+                # channel's branch may be *behind* the running commit (a
+                # deliberate downgrade back to stable)
+                "updates_available": head != target_res.stdout.strip(),
+                "commits_behind": behind,
+                "channel": channel,
+                "branch": branch,
+                "current_version": version,
+                "can_self_update": can_self,
+                "manual_reason": reason,
+            })
         except Exception as e:
             return jsonify({"error": str(e)}), 500
+
+    @app.route("/api/update/apply", methods=["POST"])
+    def update_apply():
+        """Self-update: sync to the channel's branch + pip install, then exit
+        so systemd restarts us on the new code (Restart=always) — no sudo
+        needed. Refuses when the update would change the systemd unit; that
+        path needs update.sh."""
+        import subprocess
+        import sys
+
+        channel = _current_channel()
+        branch = CHANNEL_BRANCHES[channel]
+        can_self, reason = check_self_update(base_dir, branch)
+        if not can_self:
+            return jsonify({"error": reason}), 409
+
+        fetch = subprocess.run(
+            ["git", "fetch", "origin"],
+            cwd=base_dir, capture_output=True, text=True, timeout=120,
+        )
+        if fetch.returncode != 0:
+            detail = (fetch.stderr or fetch.stdout).strip()
+            return jsonify({"error": f"git fetch failed: {detail}"}), 500
+
+        # checkout -B syncs the local branch to origin's, handling normal
+        # updates, switching onto beta, and downgrading back to stable alike
+        pull = subprocess.run(
+            ["git", "checkout", "-B", branch, f"origin/{branch}"],
+            cwd=base_dir, capture_output=True, text=True, timeout=60,
+        )
+        if pull.returncode != 0:
+            detail = (pull.stderr or pull.stdout).strip()
+            return jsonify({"error": f"git checkout failed: {detail}"}), 500
+
+        pip = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "-q", "--upgrade", "-r",
+             os.path.join(base_dir, "requirements.txt")],
+            cwd=base_dir, capture_output=True, text=True, timeout=600,
+        )
+        if pip.returncode != 0:
+            detail = (pip.stderr or pip.stdout).strip()
+            return jsonify({"error": f"pip install failed: {detail}"}), 500
+
+        head = subprocess.run(
+            ["git", "log", "-1", "--pretty=%h %s"],
+            cwd=base_dir, capture_output=True, text=True, timeout=5,
+        )
+        version = head.stdout.strip()
+        state.add_log(f"Update applied ({channel}: {version}) — restarting")
+        if log_path:
+            write_log(log_path, f"Update applied ({channel}: {version}) — restarting")
+
+        # Exit after the response has flushed; systemd restarts the service
+        # with the freshly pulled code
+        threading.Timer(2.0, lambda: os._exit(0)).start()
+        return jsonify({"ok": True, "restarting": True, "version": version})
 
     # ------------------------------------------------------------------
     # Import scan
@@ -585,8 +753,7 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
                         errors.append(f"{entry}: {e}")
 
             if imported:
-                with open(songs_path, "w") as f:
-                    json.dump(songs, f, indent=2)
+                save_json(songs_path, songs)
 
         return jsonify({"imported": imported, "errors": errors, "songs": songs})
 
@@ -623,8 +790,7 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
                     if s.get("id") == pending_id:
                         removed = s
                         break
-                with open(songs_path, "w") as f:
-                    json.dump(updated, f, indent=2)
+                save_json(songs_path, updated)
             if removed:
                 if removed.get("type") == "audiobook":
                     folder_path = os.path.join(music_folder, removed.get("folder", ""))
@@ -726,8 +892,7 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
             except Exception:
                 cfg = {}
             cfg["sync_peer"] = peer
-            with open(config_path, "w") as f:
-                json.dump(cfg, f, indent=2)
+            save_json(config_path, cfg)
 
         return jsonify({"missing": missing, "peer": peer})
 
@@ -834,7 +999,7 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
     @app.route("/api/playback/status")
     def playback_status():
         # Reads from state + songs.json only — no Chromecast connection.
-        # Position is kept fresh by the background run_position_tracker thread.
+        # Position is kept fresh by the CastMonitor's push-driven saves.
         with state._lock:
             playing = state._stonies_playing
             song_id = state._current_song_id
@@ -871,8 +1036,6 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
 
     @app.route("/api/playback/stop", methods=["POST"])
     def playback_stop():
-        import pychromecast
-
         with config_lock:
             try:
                 with open(config_path, "r") as f:
@@ -886,16 +1049,8 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
 
         try:
             import time as _time
-            chromecasts, browser = pychromecast.get_listed_chromecasts(
-                friendly_names=[speaker_name]
-            )
-            if not chromecasts:
-                pychromecast.discovery.stop_discovery(browser)
-                return jsonify({"error": f"Speaker '{speaker_name}' not found"}), 404
-            cast = chromecasts[0]
+            cast = find_cast(speaker_name, timeout=5)
             try:
-                cast.wait(timeout=5)
-                pychromecast.discovery.stop_discovery(browser)
                 mc = cast.media_controller
                 mc.update_status()
                 _time.sleep(1)
