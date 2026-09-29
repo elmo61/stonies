@@ -569,6 +569,24 @@
 
         <hr />
 
+        <h3 class="title is-6 mb-3">📺 Cast Player</h3>
+        <div class="field">
+          <label class="radio is-block mb-1">
+            <input type="radio" value="stonies" v-model="castReceiver" @change="saveCastReceiver" class="mr-1" />
+            <strong>Stonies player</strong> — cover art &amp; chapter names on screens, live audiobook position (recommended)
+          </label>
+          <label class="radio is-block ml-0">
+            <input type="radio" value="default" v-model="castReceiver" @change="saveCastReceiver" class="mr-1" />
+            <strong>Google standard player</strong> — use if a speaker won't open the Stonies player
+          </label>
+        </div>
+        <p v-if="castReceiver === 'own'" class="help has-text-grey mb-2">
+          Using a custom receiver app ID set in config.json — choose an option above to replace it.
+        </p>
+        <p v-if="castReceiverStatus" class="help is-success mb-0">{{ castReceiverStatus }}</p>
+
+        <hr />
+
         <h3 class="title is-6 mb-3">🧪 Release Channel</h3>
         <div class="field">
           <label class="radio is-block mb-1">
@@ -649,6 +667,9 @@ async function loadConfig() {
     }
     if (data.sleep_timer) {
       sleepTimer.value = { ...sleepTimer.value, ...data.sleep_timer }
+    }
+    if (data.cast_receiver) {
+      castReceiver.value = data.cast_receiver
     }
     if (data.sync_peer) {
       syncPeer.value = data.sync_peer
@@ -838,6 +859,26 @@ const updateChannel = ref('stable')
 const updateBranch = ref('main')
 const currentVersion = ref('')
 const channelSaveStatus = ref('')
+const castReceiver = ref('stonies')
+const castReceiverStatus = ref('')
+
+async function saveCastReceiver() {
+  castReceiverStatus.value = ''
+  try {
+    const res = await fetch(`${API}/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cast_receiver: castReceiver.value }),
+    })
+    const data = await res.json()
+    if (data.error) throw new Error(data.error)
+    castReceiver.value = data.cast_receiver
+    castReceiverStatus.value = 'Saved — applies from the next thing you play'
+    setTimeout(() => castReceiverStatus.value = '', 4000)
+  } catch (e) {
+    castReceiverStatus.value = `Error: ${e.message}`
+  }
+}
 
 async function checkForUpdates() {
   try {

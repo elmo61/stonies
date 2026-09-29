@@ -6,7 +6,11 @@ All notable changes to Stonies are documented here, newest first.
 
 ## 2026-09-29 — Cast receiver fixes
 
+### Added
+- **Cast Player setting** — Settings → 📺 Cast Player switches between the **Stonies player** (custom receiver) and **Google's standard player**, instead of editing `cast_app_id` in `config.json`. A custom app ID set in `config.json` still works and shows as a custom receiver.
+
 ### Fixed
+- Install docs pointed at `stonies/projects/stonies/`; a fresh clone puts the app at `stonies/`, so `setup.sh` is at `stonies/setup.sh`.
 - **Single tracks failed to cast** with *"play_media() got an unexpected keyword argument 'app_id'"* whenever the custom receiver was configured (the default). pychromecast's `play_media` has never had an `app_id` argument; tracks now open the Stonies receiver first and then play, the same way audiobooks do.
 - **Receiver position broadcasts** — the receiver called `broadcastStatus` on the wrong object, so it would never have sent position updates. It now calls it on the player manager every 30 s during playback.
 - **Playback no longer depends on the custom receiver** — if a speaker won't open it (for example, an unpublished app on a speaker that isn't a registered test device), Stonies logs it and falls back to Google's standard player instead of failing the cast.

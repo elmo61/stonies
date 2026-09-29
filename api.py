@@ -14,7 +14,7 @@ from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
-from nfc_daemon import cast_audiobook, cast_song, find_cast, lookup_song, check_and_schedule_sleep, update_play_stats
+from nfc_daemon import cast_audiobook, cast_song, cast_receiver_mode, find_cast, lookup_song, check_and_schedule_sleep, update_play_stats
 from activity_log import write_log
 from storage import save_json
 
@@ -343,6 +343,8 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
                     data = json.load(f)
             except Exception:
                 data = {}
+        # "stonies" | "default" | "own" (a custom app ID set in config.json)
+        data["cast_receiver"] = cast_receiver_mode(data)
         return jsonify(data)
 
     @app.route("/api/config", methods=["POST"])
@@ -351,10 +353,13 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
         speaker = body.get("speaker", "").strip()
         sleep_timer = body.get("sleep_timer")
         update_channel = body.get("update_channel")
-        if not speaker and sleep_timer is None and update_channel is None:
+        cast_receiver = body.get("cast_receiver")
+        if not speaker and sleep_timer is None and update_channel is None and cast_receiver is None:
             return jsonify({"error": "Nothing to save"}), 400
         if update_channel is not None and update_channel not in CHANNEL_BRANCHES:
             return jsonify({"error": "update_channel must be 'stable' or 'beta'"}), 400
+        if cast_receiver is not None and cast_receiver not in ("stonies", "default"):
+            return jsonify({"error": "cast_receiver must be 'stonies' or 'default'"}), 400
         with config_lock:
             try:
                 with open(config_path, "r") as f:
@@ -367,10 +372,17 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
                 existing["sleep_timer"] = sleep_timer
             if update_channel is not None:
                 existing["update_channel"] = update_channel
+            if cast_receiver == "stonies":
+                # Remove the key rather than writing the ID, so the device
+                # always follows the code's current default receiver
+                existing.pop("cast_app_id", None)
+            elif cast_receiver == "default":
+                existing["cast_app_id"] = None
             save_json(config_path, existing)
         return jsonify({"ok": True, "speaker": existing.get("speaker", ""),
                         "sleep_timer": existing.get("sleep_timer"),
-                        "update_channel": existing.get("update_channel")})
+                        "update_channel": existing.get("update_channel"),
+                        "cast_receiver": cast_receiver_mode(existing)})
 
     # ------------------------------------------------------------------
     # Songs

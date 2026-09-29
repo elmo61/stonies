@@ -90,7 +90,7 @@ dtparam=i2c_arm_baudrate=10000
 ```bash
 sudo apt update && sudo apt install git -y
 git clone https://github.com/elmo61/stonies.git
-bash stonies/projects/stonies/setup.sh
+bash stonies/setup.sh
 ```
 
 The script installs all system dependencies, enables I2C, creates a Python venv, and registers a systemd service so Stonies starts automatically on every boot.
@@ -108,7 +108,7 @@ When an update is available the settings bar shows an **⬆️ Update now** butt
 The button works without admin rights because it only touches files the app owns, then simply exits and lets systemd restart it on the new code. The one thing it *can't* do is rewrite the systemd service file — that needs sudo. When an update includes a service change, the UI detects it and shows **"Update available — run update.sh"** instead. In that case, SSH to the Pi and run:
 
 ```bash
-cd stonies/projects/stonies
+cd stonies
 bash update.sh
 ```
 
@@ -218,30 +218,35 @@ config.json           Speaker + sleep timer config (gitignored)
 
 ---
 
-## Advanced configuration
+## Cast player
 
-These settings are not exposed in the UI. Edit `config.json` directly on the Pi to change them.
+**Settings → 📺 Cast Player** chooses what the speaker plays through:
 
-### Custom Cast receiver (`cast_app_id`)
+| Option | Behaviour |
+|---|---|
+| **Stonies player** (default) | The Stonies Cast receiver (`A0D905F0`). Pushes the playback position to Stonies every 30 s, and on speakers with a screen shows the cover art, chapter name and book title. |
+| **Google standard player** | Google's Default Media Receiver. Use it if a speaker won't open the Stonies player. Audiobook positions are saved less often. |
 
-By default Stonies uses a registered Cast Web Receiver app (`A0D905F0`) which sends frequent position updates during audiobook playback. You can override this in `config.json`:
+The change applies from the next thing you play. Stonies falls back to Google's standard player automatically if a speaker won't open the Stonies player, and logs *"Stonies receiver unavailable — using Google's standard player"*, so music always plays.
+
+If you see that message, check the app in the [Google Cast SDK Developer Console](https://cast.google.com/publish):
+- It must be **Published**. Unpublished apps only run on speakers registered there as test devices.
+- **"Supports casting to audio only devices"** must be ticked. Otherwise Google won't open it on Nest Mini, Nest Audio, Google Home speakers or speaker groups.
+
+The receiver page is `docs/receiver.html`, served by GitHub Pages from the **`main`** branch at `https://elmo61.github.io/stonies/receiver.html`, so receiver changes only go live once they're merged to `main`.
+
+### Using your own receiver app
+
+To use a different registered receiver, set its ID in `config.json` on the Pi. Settings then shows it as a custom receiver; picking either option there replaces it.
 
 ```json
 {
   "speaker": "My Speaker",
-  "cast_app_id": "A0D905F0"
+  "cast_app_id": "YOUR_APP_ID"
 }
 ```
 
-| Value | Behaviour |
-|---|---|
-| `"A0D905F0"` | Default — uses the Stonies Cast receiver (recommended) |
-| `"YOUR_APP_ID"` | Use your own registered Cast receiver app |
-| `null` | Fall back to the Default Media Receiver (no continuous position tracking) |
-
-The receiver page is `docs/receiver.html`, served by GitHub Pages from the **`main`** branch at `https://elmo61.github.io/stonies/receiver.html` — so receiver changes only go live once they're merged to `main`. It broadcasts the playback position to Stonies every 30 s (push, rather than Stonies polling the speaker), and on speakers with a screen it shows the cover art, chapter name and book title.
-
-If a speaker won't open the custom receiver, Stonies logs *"Stonies receiver unavailable — using Google's standard player"* and plays through Google's Default Media Receiver instead, so music always plays. The usual cause is that the app is **unpublished** in the [Google Cast SDK Developer Console](https://cast.google.com/publish): unpublished apps only run on speakers registered there as test devices. Publish the app to make it work on every speaker.
+`"cast_app_id": null` is the same as choosing **Google standard player**, and leaving the key out is the same as **Stonies player**.
 
 ---
 

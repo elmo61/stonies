@@ -299,6 +299,27 @@ def update_play_stats(song_id, songs_path, songs_lock):
             pass
 
 
+# The registered Stonies Cast receiver (docs/receiver.html)
+DEFAULT_CAST_APP_ID = "A0D905F0"
+
+
+def get_cast_app_id(config):
+    """Receiver app to open for a cast, or None for Google's standard player.
+
+    config.json "cast_app_id": absent → the Stonies receiver, null → Google's
+    Default Media Receiver, any other string → that receiver app.
+    """
+    return config.get("cast_app_id", DEFAULT_CAST_APP_ID) or None
+
+
+def cast_receiver_mode(config):
+    """How the Settings UI describes the configured receiver."""
+    app_id = get_cast_app_id(config)
+    if app_id is None:
+        return "default"
+    return "stonies" if app_id == DEFAULT_CAST_APP_ID else "own"
+
+
 def _launch_receiver(cast, app_id, log_fn=None, timeout=8):
     """Open the Stonies Cast receiver on the speaker. Returns True if it's running.
 
@@ -351,7 +372,7 @@ def cast_audiobook(song, config_path, config_lock, pi_ip, start_index=0, start_t
     speaker_name = config.get("speaker", "").strip()
     if not speaker_name:
         raise RuntimeError("No speaker configured")
-    cast_app_id = config.get("cast_app_id", "A0D905F0") or None
+    cast_app_id = get_cast_app_id(config)
 
     folder = song.get("folder", "")
     chapters = song.get("chapters", [])
@@ -430,7 +451,7 @@ def cast_song(song, config_path, config_lock, pi_ip, log_fn=None):
     speaker_name = config.get("speaker", "").strip()
     if not speaker_name:
         raise RuntimeError("No speaker configured")
-    cast_app_id = config.get("cast_app_id", "A0D905F0") or None
+    cast_app_id = get_cast_app_id(config)
 
     filename = song.get("filename", "")
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
