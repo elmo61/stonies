@@ -237,6 +237,10 @@ By default Stonies uses a registered Cast Web Receiver app (`A0D905F0`) which se
 | `"YOUR_APP_ID"` | Use your own registered Cast receiver app |
 | `null` | Fall back to the Default Media Receiver (no continuous position tracking) |
 
+The receiver page is `docs/receiver.html`, served by GitHub Pages from the **`main`** branch at `https://elmo61.github.io/stonies/receiver.html` — so receiver changes only go live once they're merged to `main`. It broadcasts the playback position to Stonies every 30 s (push, rather than Stonies polling the speaker), and on speakers with a screen it shows the cover art, chapter name and book title.
+
+If a speaker won't open the custom receiver, Stonies logs *"Stonies receiver unavailable — using Google's standard player"* and plays through Google's Default Media Receiver instead, so music always plays. The usual cause is that the app is **unpublished** in the [Google Cast SDK Developer Console](https://cast.google.com/publish): unpublished apps only run on speakers registered there as test devices. Publish the app to make it work on every speaker.
+
 ---
 
 ## Reliability

@@ -4,6 +4,16 @@ All notable changes to Stonies are documented here, newest first.
 
 ---
 
+## 2026-09-29 — Cast receiver fixes
+
+### Fixed
+- **Single tracks failed to cast** with *"play_media() got an unexpected keyword argument 'app_id'"* whenever the custom receiver was configured (the default). pychromecast's `play_media` has never had an `app_id` argument; tracks now open the Stonies receiver first and then play, the same way audiobooks do.
+- **Receiver position broadcasts** — the receiver called `broadcastStatus` on the wrong object, so it would never have sent position updates. It now calls it on the player manager every 30 s during playback.
+- **Playback no longer depends on the custom receiver** — if a speaker won't open it (for example, an unpublished app on a speaker that isn't a registered test device), Stonies logs it and falls back to Google's standard player instead of failing the cast.
+- Single tracks are sent as buffered music (not a live stream), so screens show a progress bar and the track title and cover art, like audiobook chapters.
+
+---
+
 ## 2026-07-14 — Long-run reliability
 
 Fixes for the "works for a week, then needs a reboot" class of failures: leaked Chromecast connections slowly exhausting the process, and a wedged NFC reader staying dead until power cycle.

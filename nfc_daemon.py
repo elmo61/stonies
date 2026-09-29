@@ -299,6 +299,42 @@ def update_play_stats(song_id, songs_path, songs_lock):
             pass
 
 
+def _launch_receiver(cast, app_id, log_fn=None, timeout=8):
+    """Open the Stonies Cast receiver on the speaker. Returns True if it's running.
+
+    Never raises: if the speaker won't open it (e.g. the app is unpublished
+    and this speaker isn't a registered test device), log it and return
+    False. The media controller then opens Google's Default Media Receiver
+    by itself, so playback still works — just without the custom UI and
+    position broadcasts.
+    """
+    if not app_id:
+        return False
+    if getattr(cast.status, "app_id", None) == app_id:
+        return True
+
+    def _fallback(reason):
+        msg = f"Stonies receiver unavailable ({reason}) — using Google's standard player"
+        print(f"[Cast] {msg}")
+        if log_fn:
+            log_fn(msg)
+        return False
+
+    try:
+        # pychromecast 14 waits for the speaker and raises if the launch
+        # fails; 13 returns immediately, hence the status poll below
+        cast.start_app(app_id)
+    except Exception as e:
+        return _fallback(e)
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if getattr(cast.status, "app_id", None) == app_id:
+            return True
+        time.sleep(0.25)
+    return _fallback("did not start")
+
+
 def cast_audiobook(song, config_path, config_lock, pi_ip, start_index=0, start_time=0, log_fn=None):
     """Queue all chapters of an audiobook on the configured speaker. Raises on any failure."""
     from urllib.parse import quote
@@ -362,10 +398,7 @@ def cast_audiobook(song, config_path, config_lock, pi_ip, start_index=0, start_t
         if mc.status and mc.status.player_state not in (None, "IDLE", "UNKNOWN"):
             mc.stop()
             time.sleep(1)
-        if cast_app_id and getattr(cast.status, "app_id", None) != cast_app_id:
-            cast.start_app(cast_app_id)
-            time.sleep(2)
-            mc = cast.media_controller
+        _launch_receiver(cast, cast_app_id, log_fn)
         mc.send_message(
             {
                 "type": "QUEUE_LOAD",
@@ -416,10 +449,18 @@ def cast_song(song, config_path, config_lock, pi_ip, log_fn=None):
         if mc.status and mc.status.player_state not in (None, "IDLE", "UNKNOWN"):
             mc.stop()
             time.sleep(1)
-        kwargs = {"title": song.get("name", ""), "thumb": song.get("image_url") or None}
-        if cast_app_id:
-            kwargs["app_id"] = cast_app_id
-        mc.play_media(url, mime, **kwargs)
+        # play_media has no app_id argument (in any pychromecast version) —
+        # open the receiver first; the media controller then plays into
+        # whichever app is running
+        _launch_receiver(cast, cast_app_id, log_fn)
+        mc.play_media(
+            url, mime,
+            title=song.get("name", ""),
+            thumb=song.get("image_url") or None,
+            # pychromecast 14 defaults to LIVE, which hides the progress bar
+            stream_type="BUFFERED",
+            metadata={"metadataType": 3},   # MusicTrackMediaMetadata, as for audiobooks
+        )
         mc.block_until_active(timeout=10)
     finally:
         cast.disconnect()

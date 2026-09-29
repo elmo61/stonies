@@ -60,6 +60,19 @@
   <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
   <script>
     const context = cast.framework.CastReceiverContext.getInstance();
+    const playerManager = context.getPlayerManager();
+
+    // Broadcast position to all senders every 30 s during playback so
+    // Stonies receives current_time updates without needing to poll.
+    // broadcastStatus lives on the PlayerManager, not the receiver context.
+    setInterval(() => {
+      const state = playerManager.getPlayerState();
+      if (state === cast.framework.messages.PlayerState.PLAYING ||
+          state === cast.framework.messages.PlayerState.PAUSED) {
+        playerManager.broadcastStatus(true);
+      }
+    }, 30000);
+
     context.start();
   </script>
 </body>
