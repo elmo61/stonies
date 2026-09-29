@@ -2,6 +2,8 @@
 
 A Raspberry Pi app for kids — tap an NFC sticker to play a song or audiobook on a Google/Chromecast speaker. Each sticker is permanently linked to one item in your library. A web UI running on the Pi handles everything else: adding songs, writing stickers, controlling playback, and listening on the device itself.
 
+
+
 ---
 
 ## How it works
