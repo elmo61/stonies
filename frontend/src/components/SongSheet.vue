@@ -43,7 +43,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, nextTick } from 'vue'
 import { store, songById, isStory, kindLabel, savedPlace, formatTime, play } from '../store'
 import BottomSheet from './BottomSheet.vue'
 import Cover from './Cover.vue'
@@ -74,8 +74,21 @@ const targetName = computed(() => store.playTarget === 'phone' ? 'this phone' : 
 
 function close() { store.ui.songId = null }
 function openOptions() { store.ui.optionsId = song.value.id }
-function playMain() { play(song.value) }
-function playFrom(i) { play(song.value, i) }
+
+// Close the sheet and bring the now-playing card into view, so you can see
+// it start (the card shows "Starting on…" while the speaker connects)
+async function startPlaying(chapterIndex = null) {
+  const s = song.value
+  close()
+  play(s, chapterIndex)
+  // Scroll once the sheet is gone (its scroll lock released) and the card is in.
+  // Smooth where the browser animates it; jump there if it hasn't moved.
+  await nextTick()
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+  setTimeout(() => { if (window.scrollY > 0) window.scrollTo(0, 0) }, 700)
+}
+function playMain() { startPlaying() }
+function playFrom(i) { startPlaying(i) }
 </script>
 
 <style scoped>
