@@ -58,7 +58,14 @@
       </button>
     </div>
 
-    <button class="card install" @click="sheet = 'install'">
+    <button v-if="store.installPrompt" class="card install" @click="install">
+      <Icon name="download" :size="24" :stroke="2.2" class="install-icon" />
+      <span class="grow">
+        <strong>Install Stonies</strong>
+        <span>Opens full-screen like an app, even when the box is offline</span>
+      </span>
+    </button>
+    <button v-else-if="!installed" class="card install" @click="sheet = 'install'">
       <Icon name="download" :size="24" :stroke="2.2" class="install-icon" />
       <span class="grow">
         <strong>Add Stonies to your home screen</strong>
@@ -184,6 +191,17 @@ const updating = ref(false)
 const disk = ref(null)
 const update = ref(null)
 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
+// Already running as an installed app (or a full-screen home-screen icon)?
+const installed = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true
+
+async function install() {
+  const prompt = store.installPrompt
+  if (!prompt) return
+  prompt.prompt()
+  const { outcome } = await prompt.userChoice
+  store.installPrompt = null
+  if (outcome === 'accepted') toast('Stonies is installed', 'ok')
+}
 
 const castLabel = computed(() => ({ default: 'Google standard', own: 'Custom' }[store.config.cast_receiver] || 'Stonies player'))
 const bedtimeLabel = computed(() => {

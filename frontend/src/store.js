@@ -19,6 +19,7 @@ export const store = reactive({
   hostname: '',
   playTarget: loadPref('stonies.playTarget', 'speaker'),   // 'speaker' | 'phone' (per phone)
   local: null,                // on-phone playback: { song, chapter, time }
+  installPrompt: null,        // browser's install prompt, when it offers one (https only)
   castingId: null,            // song currently being sent to the speaker
   ui: {
     songId: null,             // story/song sheet
@@ -82,6 +83,15 @@ export function coverColor(id) {
   let h = 0
   for (const c of String(id)) h = (h * 31 + c.charCodeAt(0)) >>> 0
   return COVER_COLORS[h % COVER_COLORS.length]
+}
+
+// Covers are saved with the box's full http address (e.g. http://192.168.1.102:5000/images/x.jpg).
+// Load them from wherever the app was opened instead: an https page can't load
+// http images, and the box's address may have changed since the upload.
+export function coverUrl(song) {
+  const url = song?.image_url || ''
+  const i = url.indexOf('/images/')
+  return i >= 0 ? url.slice(i) : url
 }
 
 export function boxName() {
