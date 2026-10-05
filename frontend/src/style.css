@@ -30,6 +30,7 @@
 }
 
 * { box-sizing: border-box; }
+html.no-scroll, html.no-scroll body { overflow: hidden; }
 html, body { margin: 0; }
 body {
   background: var(--ground);
@@ -189,17 +190,24 @@ input, select { font: inherit; color: inherit; }
 /* ── Sheets & dialogs ───────────────────────────────────── */
 .backdrop { position: fixed; inset: 0; z-index: 60; background: rgba(23, 26, 36, 0.55); }
 .sheet {
-  position: fixed; z-index: 61; left: 0; right: 0; bottom: 0; max-height: 92vh;
+  position: fixed; z-index: 61; left: 0; right: 0; bottom: 0;
+  /* dvh = the screen actually visible right now, so the top of the sheet never
+     hides under a mobile browser's address bar (vh ignores the bar) */
+  max-height: 92vh; max-height: calc(100dvh - 24px);
   background: var(--card); border-radius: 26px 26px 0 0;
   display: flex; flex-direction: column; padding-bottom: env(safe-area-inset-bottom);
+  transform: translateY(var(--drag, 0px)); transition: transform 0.2s ease-out;
+  overscroll-behavior: contain;
   animation: rise 0.18s ease-out;
 }
-@media (min-width: 600px) { .sheet { left: 50%; right: auto; width: 560px; transform: translateX(-50%); } }
-.sheet-handle { display: flex; justify-content: center; padding-top: 10px; }
+.sheet.dragging { transition: none; }
+@media (min-width: 600px) { .sheet { left: 50%; right: auto; width: 560px; transform: translate(-50%, var(--drag, 0px)); } }
+.sheet-grab { flex-shrink: 0; touch-action: none; }
+.sheet-handle { display: flex; justify-content: center; padding: 10px 0 8px; cursor: grab; }
 .sheet-handle span { width: 44px; height: 5px; border-radius: 3px; background: #D3D7E2; }
 .sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 10px 4px 20px; }
 .sheet-head h2 { font-family: var(--display); font-weight: 600; font-size: 22px; }
-.sheet-body { overflow-y: auto; padding: 4px 16px 20px; }
+.sheet-body { overflow-y: auto; overscroll-behavior: contain; min-height: 0; padding: 4px 16px 20px; }
 .action-sheet { position: fixed; z-index: 61; left: 10px; right: 10px; bottom: calc(12px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 10px; animation: rise 0.18s ease-out; }
 @media (min-width: 600px) { .action-sheet { left: 50%; right: auto; width: 540px; transform: translateX(-50%); } }
 .action-sheet .group { background: var(--card); border-radius: 24px; overflow: hidden; }

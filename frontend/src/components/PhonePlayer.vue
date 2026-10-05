@@ -115,7 +115,7 @@ onUnmounted(teardown)
 .pp-toggle { background: var(--amber); color: var(--navy); }
 .pp-scrub { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--navy-ink); }
 .pp-scrub span { min-width: 36px; text-align: center; }
-.pp-chapters { list-style: none; margin: 0 0 8px; padding: 0; max-height: 40vh; overflow-y: auto; border-bottom: 1px solid var(--navy-2); }
+.pp-chapters { list-style: none; margin: 0 0 8px; padding: 0; max-height: 40vh; max-height: 40dvh; overscroll-behavior: contain; overflow-y: auto; border-bottom: 1px solid var(--navy-2); }
 .pp-ch { width: 100%; min-height: 44px; display: flex; align-items: center; gap: 10px; padding: 0 8px; border-radius: 10px; text-align: left; }
 .pp-ch.on { background: var(--navy-2); color: var(--amber-light); font-weight: 700; }
 .pp-num { width: 24px; text-align: center; color: var(--navy-ink); }

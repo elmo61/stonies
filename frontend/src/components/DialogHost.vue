@@ -22,6 +22,7 @@
 <script setup>
 import { computed, ref, watch, nextTick } from 'vue'
 import { store } from '../store'
+import { lockScroll, unlockScroll } from '../scrollLock'
 
 const d = computed(() => store.ui.dialog)
 const value = ref('')
@@ -36,6 +37,9 @@ watch(d, async (dlg) => {
   if (dlg.kind === 'prompt') { input.value?.focus(); input.value?.select() }
   else cancelBtn.value?.focus()
 })
+
+// Keep the page behind still while this is open
+watch(() => !!d.value, (open, was) => { if (open && !was) lockScroll(); else if (!open && was) unlockScroll() })
 
 function answer(ok) {
   const dlg = d.value

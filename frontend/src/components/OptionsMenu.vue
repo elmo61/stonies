@@ -39,6 +39,7 @@
 import { computed, ref, watch, nextTick } from 'vue'
 import { store, songById, isStory, savedPlace, formatTime, writeSticker, renameSong, clearSavedPlace, deleteSong, playOnPhone } from '../store'
 import Icon from './Icon.vue'
+import { lockScroll, unlockScroll } from '../scrollLock'
 
 const song = computed(() => songById(store.ui.optionsId))
 const place = computed(() => song.value ? savedPlace(song.value) : null)
@@ -47,6 +48,9 @@ function editChapters(s) { store.ui.chaptersId = s.id }
 const first = ref(null)
 
 watch(song, async (s) => { if (s) { await nextTick(); first.value?.focus() } })
+
+// Keep the page behind still while this is open
+watch(() => !!song.value, (open, was) => { if (open && !was) lockScroll(); else if (!open && was) unlockScroll() })
 
 function close() { store.ui.optionsId = null }
 

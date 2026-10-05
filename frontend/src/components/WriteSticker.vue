@@ -47,6 +47,7 @@ import { computed, ref, watch, onUnmounted } from 'vue'
 import { store, songById, cancelWriting, writeSticker, loadSongs, pollNow } from '../store'
 import Cover from './Cover.vue'
 import Icon from './Icon.vue'
+import { lockScroll, unlockScroll } from '../scrollLock'
 
 const WRITE_TIMEOUT = 20   // seconds — matches the box's own write timeout
 
@@ -63,6 +64,10 @@ watch(() => store.ui.writing, (w) => {
   if (w) ticker = setInterval(() => { now.value = Date.now() }, 1000)
 }, { immediate: true })
 onUnmounted(() => clearInterval(ticker))
+
+// Keep the page behind still while this is open
+watch(() => !!store.ui.writing, (open, was) => { if (open && !was) lockScroll(); else if (!open && was) unlockScroll() })
+
 
 // The box briefly reports success/error, then goes back to listening — latch it
 watch(() => [store.nfc.mode, store.nfc.sub_state], ([mode, sub]) => {
