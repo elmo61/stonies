@@ -19,7 +19,7 @@ A complete redesign of the web app for phones. The old screen had 324 buttons on
 - **"Box isn't answering" screen** — appears when the box stops responding, with steps to try, and clears itself
 - **Activity timeline** — plain-English history, technical log on request
 - **Add flow** — Story / Album / Song, folder or file picker, chapter-name check, take a photo of the cover, upload progress
-- **Add to home screen** — manifest and icons; opens full-screen from an icon
+- **Add to home screen** — manifest and icons; full-screen from an icon on iPhone, a shortcut on Android (a full Android install needs https)
 - Bundled fonts and styles, so the app no longer loads anything from the internet (Bulma from a CDN is gone)
 
 ### Changed

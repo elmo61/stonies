@@ -62,7 +62,7 @@
       <Icon name="download" :size="24" :stroke="2.2" class="install-icon" />
       <span class="grow">
         <strong>Add Stonies to your home screen</strong>
-        <span>Opens full-screen like an app</span>
+        <span>An icon on your phone that opens this box</span>
       </span>
     </button>
 
@@ -148,19 +148,23 @@
 
     <!-- Add to home screen -->
     <BottomSheet v-if="sheet === 'install'" title="Add to home screen" @close="sheet = null">
-      <p class="sheet-note">Then Stonies opens from an icon, full-screen, like any other app.</p>
-      <ol class="install-steps">
-        <template v-if="isIOS">
+      <template v-if="isIOS">
+        <p class="sheet-note">Then Stonies opens full-screen from an icon, like any other app.</p>
+        <ol class="install-steps">
           <li>Tap the <strong>Share</strong> button at the bottom of Safari.</li>
           <li>Choose <strong>Add to Home Screen</strong>.</li>
           <li>Tap <strong>Add</strong>.</li>
-        </template>
-        <template v-else>
-          <li>Open your browser's <strong>⋮ menu</strong>.</li>
-          <li>Choose <strong>Add to Home screen</strong> (or <strong>Install app</strong>).</li>
-          <li>Tap <strong>Add</strong>.</li>
-        </template>
-      </ol>
+        </ol>
+      </template>
+      <template v-else>
+        <p class="sheet-note">Then a Stonies icon on your home screen opens this box.</p>
+        <ol class="install-steps">
+          <li>Open Chrome's <strong>⋮ menu</strong>.</li>
+          <li>Choose <strong>Add to home screen</strong>.</li>
+          <li>Choose <strong>Create shortcut</strong>, then <strong>Add</strong>.</li>
+        </ol>
+        <p class="muted sheet-note">If Chrome offers <strong>Install</strong> and then says the app can't be installed, that's expected: a full install needs the box to use a secure (https) address, which is on the to-do list. The shortcut works fine meanwhile.</p>
+      </template>
       <p class="muted sheet-note">Each box has its own address, so add one icon per box.</p>
     </BottomSheet>
   </div>

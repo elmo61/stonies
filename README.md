@@ -54,7 +54,7 @@ The web app is built for phones first: every button is at least 44px, rarely use
 - **Activity** — a plain-English timeline of stickers, plays, bedtime stops, updates and problems, with the technical log one tap away
 - **Updates** — stable/beta channel and one-tap updates in Settings
 - **Bedtime** — anything started after a set time stops after a set number of minutes
-- **Add to home screen** — opens full-screen from an icon like an app (Settings shows how)
+- **Add to home screen** — a home-screen icon for each box (full-screen on iPhone; a shortcut on Android until the boxes have https; Settings shows how)
 
 ---
 
