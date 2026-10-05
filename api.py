@@ -131,6 +131,44 @@ def check_self_update(base_dir, branch="main"):
         return True, None
 
 
+def read_wifi_status(interface="wlan0"):
+    """Wi-Fi link quality from /proc/net/wireless — read-only, no subprocess.
+
+    Returns None when there's nothing to report (not Linux, Wi-Fi off, or a
+    wired-only box)."""
+    try:
+        with open("/proc/net/wireless") as f:
+            lines = f.readlines()[2:]   # skip the two header lines
+    except OSError:
+        return None
+    for line in lines:
+        name, _, rest = line.partition(":")
+        if name.strip() != interface:
+            continue
+        try:
+            parts = rest.split()
+            link = float(parts[1].rstrip("."))    # link quality, out of 70
+            level = float(parts[2].rstrip("."))   # signal level in dBm
+        except (IndexError, ValueError):
+            return None
+        if link <= 0:
+            return {"interface": interface, "connected": False}
+        if level >= -60:
+            strength = "strong"
+        elif level >= -70:
+            strength = "ok"
+        else:
+            strength = "weak"
+        return {
+            "interface": interface,
+            "connected": True,
+            "signal_dbm": int(level),
+            "quality_pct": max(0, min(100, round(link / 70 * 100))),
+            "strength": strength,
+        }
+    return None
+
+
 def download_file(url, dest, timeout=60):
     """Download url to dest with a socket timeout. urlretrieve has no timeout —
     a peer disappearing mid-transfer used to hang the sync thread forever,
@@ -498,10 +536,20 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
 
     @app.route("/api/songs/<song_id>", methods=["PATCH"])
     def rename_song(song_id):
+        """Rename a song and/or its chapters.
+
+        Body: {"name": "..."} and/or {"chapter_names": [...]}, one entry per
+        chapter in order. A blank entry keeps that chapter's current name.
+        """
         body = request.get_json(silent=True) or {}
-        name = body.get("name", "").strip()
-        if not name:
-            return jsonify({"error": "name is required"}), 400
+        name = (body.get("name") or "").strip()
+        chapter_names = body.get("chapter_names")
+        if not name and chapter_names is None:
+            return jsonify({"error": "name or chapter_names is required"}), 400
+        if chapter_names is not None and (
+                not isinstance(chapter_names, list)
+                or not all(isinstance(n, str) for n in chapter_names)):
+            return jsonify({"error": "chapter_names must be a list of strings"}), 400
         with songs_lock:
             try:
                 with open(songs_path, "r") as f:
@@ -510,12 +558,25 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
                 songs = []
             for s in songs:
                 if s.get("id") == song_id:
-                    s["name"] = name
                     break
             else:
                 return jsonify({"error": "Song not found"}), 404
+            if chapter_names is not None:
+                chapters = s.get("chapters") or []
+                if not chapters:
+                    return jsonify({"error": "This song has no chapters"}), 400
+                if len(chapter_names) != len(chapters):
+                    return jsonify({"error": f"Expected {len(chapters)} chapter names"}), 400
+                for ch, new_name in zip(chapters, chapter_names):
+                    if new_name.strip():
+                        ch["name"] = new_name.strip()
+            if name:
+                s["name"] = name
             save_json(songs_path, songs)
-        return jsonify({"ok": True, "name": name})
+            result = {"ok": True, "name": s["name"]}
+            if chapter_names is not None:
+                result["chapters"] = s["chapters"]
+        return jsonify(result)
 
     @app.route("/api/songs/<song_id>/progress", methods=["DELETE"])
     def clear_progress(song_id):
@@ -779,40 +840,11 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
 
     @app.route("/api/nfc/cancel", methods=["POST"])
     def nfc_cancel():
-        # Get pending song id before cancelling so we can clean it up
-        status = state.get_status()
-        pending_id = None
-        if status["mode"] == "writing":
-            with state._lock:
-                pending_id = state._pending_song_id
-
+        # Only stops write mode. The song always stays in the library — the
+        # same as when a write times out. (This used to delete the pending
+        # song and its audio, which also wiped existing songs when re-writing
+        # a sticker was cancelled.) Unwanted songs are deleted explicitly.
         state.cancel_write()
-
-        # Remove orphaned song record + file if write hadn't succeeded
-        if pending_id and status.get("sub_state") not in ("success",):
-            removed = None
-            with songs_lock:
-                try:
-                    with open(songs_path, "r") as f:
-                        songs = json.load(f)
-                except Exception:
-                    songs = []
-                updated = [s for s in songs if s.get("id") != pending_id]
-                for s in songs:
-                    if s.get("id") == pending_id:
-                        removed = s
-                        break
-                save_json(songs_path, updated)
-            if removed:
-                if removed.get("type") == "audiobook":
-                    folder_path = os.path.join(music_folder, removed.get("folder", ""))
-                    if os.path.isdir(folder_path):
-                        shutil.rmtree(folder_path)
-                else:
-                    file_path = os.path.join(music_folder, removed.get("filename", ""))
-                    if os.path.isfile(file_path):
-                        os.remove(file_path)
-
         return jsonify({"ok": True})
 
     # ------------------------------------------------------------------
@@ -1085,5 +1117,17 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
             "free_gb": round(usage.free / 1024 ** 3, 2),
             "total_gb": round(usage.total / 1024 ** 3, 2),
         })
+
+    @app.route("/api/box")
+    def api_box():
+        import socket
+        return jsonify({"hostname": socket.gethostname()})
+
+    @app.route("/api/wifi")
+    def api_wifi():
+        info = read_wifi_status()
+        if info is None:
+            return jsonify({"available": False})
+        return jsonify({"available": True, **info})
 
     return app

@@ -23,35 +23,38 @@ When you add a new track or audiobook via the UI:
 
 ## Features
 
-### Playback
-- **Tracks** — single `.mp3` / `.m4a` files cast to any Google/Chromecast speaker
-- **Audiobooks** — multi-chapter folders queued as a playlist; resumes from where you left off across taps
-- **On-device playback** — play audio directly in the browser with no speaker needed; persists while navigating between pages
-- **Fixed bottom player bar** — always-visible controls with a scrubber, prev/next chapter buttons, and an expandable chapter list to jump to any chapter
-- **Chromecast now-playing** — shows current track, chapter, and saved position while casting
+The web app is built for phones first: every button is at least 44px, rarely used actions live behind a ⋮ menu, and it works without the internet (fonts and styles are bundled).
 
-### NFC
-- **Write on upload** — upload a song and immediately write its ID to a sticker in one flow
-- **Re-tag** — write an existing song's ID to a new sticker at any time
-- **Offline mode** — stickers are identified but nothing is cast; useful for testing without a speaker
-- **NFC status indicator** — live heartbeat in the nav bar showing daemon health
+### Playing
+- **Library** — stories and songs as big rows with cover art (or coloured initials), filters for All / Stories / Songs, and search across names and chapter titles
+- **One tap to play** — each row has a single play button; tap the row to open the story
+- **Tap a chapter to play it** — the story sheet lists chapters by name; the playing chapter and saved place are highlighted, earlier ones ticked
+- **Resume** — stories pick up where they left off, whether started from a sticker or the app
+- **Now playing card** — what's playing, which chapter, a stop button, and one-tap chips for the speaker and bedtime
+- **Speaker picker** — every speaker on your Wi-Fi plus "This phone"; stickers always play on the chosen speaker
+- **Play on this phone** — listen in the browser with no speaker; has a scrubber and chapter skip
+
+### Stickers
+- **Write on upload** — add a story or song and write its sticker in one flow, with a full-screen "hold a sticker on the box" guide
+- **Write another copy** — any song's ⋮ menu → Write to a sticker; cancelling never deletes anything
+- **Quiet mode** (Settings) — stickers are recognised but nothing plays; handy for testing
 - **Debounce** — rapid re-taps of the same sticker are ignored
 
-### Library management
-- **Scan Imports** — drop files into `music_import/` on the Pi and import them in one click
-- **Inline rename** — rename any track or audiobook directly in the library
-- **Search** — filter by name or chapter title
-- **Cover art** — upload an image per song; displayed in the library and sent to the Chromecast
-- **Clear progress** — reset a saved audiobook position to start from the beginning
-- **Device sync** — pull songs from another Stonies device on the same network
+### Library management (⋮ menu and Settings)
+- **Rename** songs, and **rename chapters** from an editable list
+- **Start from the beginning next time** — forgets a story's saved place
+- **Delete** — asks first
+- **Add** — Story / Album / Song, pick a folder or files, check chapter names, and take a photo of the book cover as its artwork; shows upload progress
+- **Copy from another box** — pull songs another Stonies box has and this one doesn't
+- **Import folder** — files copied into `music_import/` on the Pi, imported in one tap
 
-### Settings & automation
-- **Speaker selection** — scan and save any Google/Chromecast speaker on the network
-- **Bedtime sleep timer** — automatically stops playback after a set duration if started after a configured time (e.g. stop after 60 min if started after 7 pm)
-- **Update badge** — notified in the UI when commits are available on `origin/main`
-
-### Activity log
-- Dedicated `/log` page showing a live feed of every tag read, cast event, and position save
+### Looking after the box
+- **"Is it working?"** — Wi-Fi signal strength, sticker reader, whether the speaker is found, cast player, storage and updates, all in one place (tap the status chip at the top)
+- **"Box isn't answering" screen** — appears when the box stops responding, with the steps to try, and clears itself when it's back
+- **Activity** — a plain-English timeline of stickers, plays, bedtime stops, updates and problems, with the technical log one tap away
+- **Updates** — stable/beta channel and one-tap updates in Settings
+- **Bedtime** — anything started after a set time stops after a set number of minutes
+- **Add to home screen** — opens full-screen from an icon like an app (Settings shows how)
 
 ---
 
@@ -169,15 +172,15 @@ requirements.txt      Python dependencies (single source for setup.sh / update.s
 INSTALL.md            Manual install guide
 frontend/
   src/
-    App.vue           Root component — nav, persistent player bar, disk footer
-    views/
-      Home.vue        Song library, upload, settings, sync
-      Log.vue         Live activity log page
-    components/
-      LocalPlayerBar.vue  Self-contained on-device audio player component
-    playerStore.js    Shared playback state ref (survives page navigation)
-    router.js         Vue Router config
-    style.css         Global styles
+    App.vue           App shell — top bar (box name + status), tab bar, sheets
+    store.js          Shared state, polling and actions (play, rename, stickers…)
+    api.js            API wrapper; notices when the box stops answering
+    style.css         Mobile-first styles (no CSS framework)
+    router.js         Routes: /, /activity, /settings, /status, /add
+    views/            Library, Activity, Settings, Status ("Is it working?"), Add
+    components/       Now playing, story sheet, ⋮ menu, speaker picker, chapter editor,
+                      sticker writer, phone player, offline screen, dialogs, icons
+  public/             manifest.json + home-screen icons
   dist/               Pre-built frontend (committed — Pi needs no Node.js)
 music/                Audio files (gitignored — add your own)
 music_import/         Drop files here; use Scan Imports to add them (gitignored)
@@ -198,7 +201,7 @@ config.json           Speaker + sleep timer config (gitignored)
 | POST | `/api/config` | Save config |
 | GET | `/api/songs` | List all songs |
 | POST | `/api/songs` | Upload a track or audiobook (multipart) |
-| PATCH | `/api/songs/<id>` | Rename a song |
+| PATCH | `/api/songs/<id>` | Rename a song (`name`) and/or its chapters (`chapter_names`, one per chapter; blank keeps the old name) |
 | DELETE | `/api/songs/<id>` | Delete a song and its files |
 | DELETE | `/api/songs/<id>/progress` | Clear saved audiobook position |
 | POST | `/api/songs/<id>/retag` | Write NFC tag for an existing song |
@@ -206,13 +209,15 @@ config.json           Speaker + sleep timer config (gitignored)
 | GET | `/api/playback/status` | Current Chromecast playback state |
 | POST | `/api/playback/stop` | Stop Chromecast playback |
 | GET | `/api/nfc/status` | NFC daemon state + activity log |
-| POST | `/api/nfc/cancel` | Cancel a pending write |
-| POST | `/api/offline/toggle` | Toggle offline mode |
+| POST | `/api/nfc/cancel` | Stop writing a sticker (the song always stays in the library) |
+| POST | `/api/offline/toggle` | Toggle quiet mode (stickers recognised, nothing plays) |
 | POST | `/api/import/scan` | Import files from `music_import/` |
 | POST | `/api/sync/preview` | Preview songs available from a peer device |
 | POST | `/api/sync/pull` | Pull missing songs from a peer device |
 | GET | `/api/sync/status` | Sync job progress |
 | GET | `/api/disk` | Disk usage of the music folder |
+| GET | `/api/wifi` | Wi-Fi signal (`signal_dbm`, `quality_pct`, `strength`: strong/ok/weak), read-only |
+| GET | `/api/box` | The box's hostname |
 | GET | `/api/update/status` | Update check for the configured channel: availability, version, self-apply eligibility |
 | POST | `/api/update/apply` | Self-update to the channel's branch: sync, install deps, restart (409 if it needs `update.sh`) |
 

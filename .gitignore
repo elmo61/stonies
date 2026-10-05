@@ -10,6 +10,10 @@ venv/
 # Runtime data — personal, generated at runtime, not for version control
 songs.json
 config.json
+activity.log
+activity.log.tmp
+images/
+music_import/
 
 # Audio files — large and personal, store locally only
 music/*

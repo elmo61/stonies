@@ -4,6 +4,35 @@ All notable changes to Stonies are documented here, newest first.
 
 ---
 
+## 2026-10-05 — New mobile-first app
+
+A complete redesign of the web app for phones. The old screen had 324 buttons on one page, 323 of them smaller than a fingertip (under 44px), including a Delete button on every row.
+
+### Added
+- **New look, built for phones** — every button is at least 44px; one play button per row, and rarely used actions moved into a ⋮ menu
+- **Tap a chapter to play it** — chapters are listed by name; the playing chapter and saved place are highlighted
+- **Now playing card** — stop, plus one-tap speaker and bedtime chips
+- **Speaker picker** — every speaker on the Wi-Fi plus "This phone"
+- **Rename chapters** — from the ⋮ menu (the rename API now also accepts `chapter_names`)
+- **"Is it working?" screen** — Wi-Fi strength, sticker reader, speaker found, cast player, storage and updates
+- **Wi-Fi strength** — new read-only `GET /api/wifi`; plus `GET /api/box` for the box's name
+- **"Box isn't answering" screen** — appears when the box stops responding, with steps to try, and clears itself
+- **Activity timeline** — plain-English history, technical log on request
+- **Add flow** — Story / Album / Song, folder or file picker, chapter-name check, take a photo of the cover, upload progress
+- **Add to home screen** — manifest and icons; opens full-screen from an icon
+- Bundled fonts and styles, so the app no longer loads anything from the internet (Bulma from a CDN is gone)
+
+### Changed
+- "Offline mode" is now **Quiet mode** and lives in Settings
+- The Logs page is now **Activity** (`/log` redirects there)
+
+### Fixed
+- **Cancelling a sticker write deleted the song and its audio**, including existing songs being re-written. Cancel now only stops writing; the song always stays.
+- **Chapter names could land on the wrong file** when uploading, because the app and the box sorted file names differently. The app now sorts exactly as the box does.
+- `activity.log`, `images/` and `music_import/` are now git-ignored
+
+---
+
 ## 2026-09-29 — Cast receiver fixes
 
 ### Added
