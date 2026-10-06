@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="680" height="420" viewBox="0 0 680 420" font-family="Arial, Helvetica, sans-serif" role="img">
+<title>Stonies status light wiring</title>
+<rect width="680" height="420" fill="#FFFFFF"/>
+<rect x="40" y="40" width="210" height="330" rx="4" fill="#F1EFE8" stroke="#5F5E5A"/>
+<g font-size="14" fill="#2C2C2A">
+<text x="56" y="66" font-weight="bold">Pi Zero 2 W pins</text>
+<text x="56" y="105">Pin 1 · 3.3V</text>
+<text x="56" y="137">Pin 3 · GPIO 2 (SDA)</text>
+<text x="56" y="169">Pin 5 · GPIO 3 (SCL)</text>
+<text x="56" y="201">Pin 6 · GND</text>
+<text x="56" y="253">Pin 11 · GPIO 17</text>
+<text x="56" y="285">Pin 13 · GPIO 27</text>
+<text x="56" y="317">Pin 15 · GPIO 22</text>
+<text x="56" y="349">Pin 14 · GND</text>
+</g>
+<g stroke-width="3">
+<line x1="250" y1="100" x2="470" y2="100" stroke="#888780"/>
+<line x1="250" y1="132" x2="470" y2="132" stroke="#888780"/>
+<line x1="250" y1="164" x2="470" y2="164" stroke="#888780"/>
+<line x1="250" y1="196" x2="470" y2="196" stroke="#888780"/>
+<line x1="250" y1="248" x2="470" y2="248" stroke="#E24B4A"/>
+<line x1="250" y1="280" x2="470" y2="280" stroke="#639922"/>
+<line x1="250" y1="312" x2="470" y2="312" stroke="#378ADD"/>
+<line x1="250" y1="344" x2="470" y2="344" stroke="#2C2C2A"/>
+</g>
+<g fill="#FAC775" stroke="#854F0B">
+<rect x="330" y="241" width="50" height="14" rx="2"/>
+<rect x="330" y="273" width="50" height="14" rx="2"/>
+<rect x="330" y="305" width="50" height="14" rx="2"/>
+</g>
+<g font-size="12" fill="#633806" text-anchor="middle">
+<text x="355" y="235">220Ω</text>
+<text x="355" y="267">100Ω</text>
+<text x="355" y="299">100Ω</text>
+</g>
+<rect x="470" y="80" width="170" height="136" rx="4" fill="#F1EFE8" stroke="#5F5E5A"/>
+<g font-size="12" fill="#444441">
+<text x="480" y="104">VCC</text><text x="480" y="136">SDA</text>
+<text x="480" y="168">SCL</text><text x="480" y="200">GND</text>
+</g>
+<text x="585" y="142" font-size="14" font-weight="bold" fill="#2C2C2A" text-anchor="middle">PN532 reader</text>
+<text x="585" y="160" font-size="12" fill="#5F5E5A" text-anchor="middle">already wired</text>
+<rect x="470" y="228" width="170" height="136" rx="4" fill="#EEEDFE" stroke="#534AB7"/>
+<g font-size="12" fill="#3C3489">
+<text x="480" y="252">R</text><text x="480" y="284">G</text>
+<text x="480" y="316">B</text><text x="480" y="348">GND</text>
+</g>
+<text x="585" y="290" font-size="14" font-weight="bold" fill="#26215C" text-anchor="middle">RGB LED</text>
+<text x="585" y="308" font-size="12" fill="#534AB7" text-anchor="middle">long leg to GND</text>
+<text x="40" y="398" font-size="12" fill="#444441">Grey wires: existing reader. Coloured: new LED. Common cathode, diffused, 5mm.</text>
+</svg>
