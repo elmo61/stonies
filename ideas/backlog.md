@@ -10,7 +10,11 @@ The redesigned UI (2026-10) shipped front-end first. These pieces need new code 
 - **Wi-Fi hiccup history** — log Wi-Fi drops/reconnects so "Is it working?" can show "dropped twice today, reconnected by itself"
 - **Network watchdog** — reconnect Wi-Fi (or restart cleanly) when the box falls off the network, instead of needing an unplug
 - **Multi-box view** — one place to see every Stonies box; needs boxes to know about each other (each box only knows itself today)
-- **HTTPS on the boxes** — needed for a real installable app that opens offline (browsers only allow offline caching on https). Best bet: a free DuckDNS name per box + Let's Encrypt DNS-challenge certificate, renewed on the Pi. Alternatives: Tailscale, or mkcert/self-signed (warnings on every phone)
+- **HTTPS on the boxes** — the last step to a real installable app that opens offline. **The app side is done** (service worker, Install button, https-safe cover URLs, all on beta since 2026-10-06), so only the box setup remains. Plan: nginx on 443 in front of Stonies, keeping port 5000 http for the speakers, plus a setup script per box. Routes considered:
+  - **DuckDNS + Let's Encrypt (recommended)** — free name per box, auto-renewing certificate via DNS challenge, nothing to install on phones; a timer on the box keeps the name pointed at its current address. Needs a DuckDNS account + token, and a check that the router doesn't block names pointing at home addresses.
+  - **Own trusted certificate (mkcert)** — fully local, but the certificate must be installed on every phone, boxes need fixed addresses, manual renewal, and the master key needs guarding.
+  - **Own domain (e.g. Cloudflare)** — like DuckDNS but sturdier, if a domain is ever bought.
+  - Tailscale also works, but needs the app on every phone.
 - **Albums as a real type** — the upload screen offers Album, but the box still saves albums as `audiobook`, so they show under Stories
 
 ## Not yet built
