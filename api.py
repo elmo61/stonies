@@ -14,8 +14,9 @@ from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
-from nfc_daemon import cast_audiobook, cast_song, cast_receiver_mode, find_cast, get_ip, lookup_song, check_and_schedule_sleep, update_play_stats
+from nfc_daemon import start_playback, cast_receiver_mode, find_cast, get_ip, lookup_song, check_and_schedule_sleep, update_play_stats
 from activity_log import write_log
+import streams
 from storage import save_json
 
 
@@ -261,7 +262,11 @@ def run_sync(peer_hostname, pi_ip, songs_path, songs_lock, music_folder,
                     )
                     song_copy["image_url"] = f"http://{pi_ip}:5000/images/{img_filename}"
 
-                if song.get("type") == "audiobook":
+                if song.get("type") in ("radio", "podcast"):
+                    for key in ("stream_url", "content_type", "feed_url", "episode_mode", "latest"):
+                        if key in song:
+                            song_copy[key] = song[key]
+                elif song.get("type") == "audiobook":
                     folder = song.get("folder", song_id)
                     chapters = song.get("chapters", [])
                     folder_path = os.path.join(music_folder, folder)
@@ -509,6 +514,44 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
                 "uploaded_at": datetime.now().isoformat(timespec="seconds"),
             }
 
+        elif song_type in ("radio", "podcast"):
+            # Plays from a web address; nothing is stored but the details
+            try:
+                if song_type == "radio":
+                    checked = streams.check_radio(request.form.get("url", ""))
+                    details = {"stream_url": checked["url"], "content_type": checked["content_type"]}
+                    feed_image = ""
+                else:
+                    feed_url = request.form.get("url", "").strip()
+                    feed = streams.fetch_feed(feed_url)
+                    mode = request.form.get("episode_mode", "newest")
+                    details = {
+                        "feed_url": feed_url,
+                        "episode_mode": mode if mode in streams.EPISODE_MODES else "newest",
+                        "latest": streams.episode_summary(feed["episodes"]),
+                    }
+                    feed_image = feed["image"]
+                    streams.remember_feed(song_id, feed_url, feed)
+            except streams.StreamError as e:
+                return jsonify({"error": f"That didn't work: {e}"}), 400
+            # Cover: one chosen on the phone wins, then the directory's picture,
+            # then the podcast's own artwork. A missing picture never stops the add.
+            remote_image = request.form.get("image_remote", "").strip() or feed_image
+            if not image_url and remote_image:
+                try:
+                    img_filename = streams.download_image(remote_image, images_folder, song_id)
+                    image_url = f"http://{pi_ip}:5000/images/{img_filename}"
+                except streams.StreamError as e:
+                    state.add_log(f"Couldn't fetch the cover for \"{name}\": {e}")
+            song = {
+                "id": song_id,
+                "type": song_type,
+                "name": name,
+                **details,
+                "image_url": image_url,
+                "uploaded_at": datetime.now().isoformat(timespec="seconds"),
+            }
+
         else:
             file = request.files.get("file")
             if not file or file.filename == "":
@@ -554,8 +597,11 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
         body = request.get_json(silent=True) or {}
         name = (body.get("name") or "").strip()
         chapter_names = body.get("chapter_names")
-        if not name and chapter_names is None:
-            return jsonify({"error": "name or chapter_names is required"}), 400
+        episode_mode = body.get("episode_mode")
+        if not name and chapter_names is None and episode_mode is None:
+            return jsonify({"error": "name, chapter_names or episode_mode is required"}), 400
+        if episode_mode is not None and episode_mode not in streams.EPISODE_MODES:
+            return jsonify({"error": "episode_mode must be newest or next"}), 400
         if chapter_names is not None and (
                 not isinstance(chapter_names, list)
                 or not all(isinstance(n, str) for n in chapter_names)):
@@ -580,10 +626,16 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
                 for ch, new_name in zip(chapters, chapter_names):
                     if new_name.strip():
                         ch["name"] = new_name.strip()
+            if episode_mode is not None:
+                if s.get("type") != "podcast":
+                    return jsonify({"error": "Only podcasts have an episode choice"}), 400
+                s["episode_mode"] = episode_mode
             if name:
                 s["name"] = name
             save_json(songs_path, songs)
             result = {"ok": True, "name": s["name"]}
+            if episode_mode is not None:
+                result["episode_mode"] = episode_mode
             if chapter_names is not None:
                 result["chapters"] = s["chapters"]
         return jsonify(result)
@@ -656,7 +708,9 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
             save_json(songs_path, updated)
 
         if removed:
-            if removed.get("type") == "audiobook":
+            if removed.get("type") in ("radio", "podcast"):
+                streams.remove_cache(removed["id"])     # nothing else stored but the cover
+            elif removed.get("type") == "audiobook":
                 folder_path = os.path.join(music_folder, removed.get("folder", ""))
                 if os.path.isdir(folder_path):
                     shutil.rmtree(folder_path)
@@ -1056,20 +1110,9 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
 
         try:
             state.add_log(f"Web play: \"{song['name']}\"...")
-            if song.get("type") == "audiobook":
-                prog = song.get("progress", {})
-                if chapter_index is not None:
-                    start_index, start_time = chapter_index, 0
-                else:
-                    start_index = prog.get("chapter_index", 0)
-                    start_time = prog.get("current_time", 0)
-                cast_audiobook(song, config_path, config_lock, pi_ip,
-                               start_index=start_index, start_time=start_time,
-                               log_fn=state.add_log)
-                state.set_now_playing(song_id, chapter_index=start_index)
-            else:
-                cast_song(song, config_path, config_lock, pi_ip, log_fn=state.add_log)
-                state.set_now_playing(song_id)
+            chapter = start_playback(song, songs_path, songs_lock, config_path, config_lock,
+                                     pi_ip, chapter_index=chapter_index, log_fn=state.add_log)
+            state.set_now_playing(song_id, chapter_index=chapter)
             if monitor:
                 monitor.on_play()
             update_play_stats(song_id, songs_path, songs_lock)
@@ -1118,6 +1161,12 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
             prog = matched.get("progress", {})
             result["current_time"] = prog.get("current_time", 0)
             result["progress"] = prog
+        elif matched.get("type") == "podcast":
+            prog = matched.get("progress", {})
+            result["current_time"] = prog.get("current_time", 0)
+            result["episode_title"] = prog.get("episode_title", "")
+        elif matched.get("type") == "radio":
+            result["live"] = True
 
         return jsonify(result)
 
@@ -1152,6 +1201,40 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
             return jsonify({"ok": True})
         except Exception as e:
             return jsonify({"error": str(e)}), 500
+
+    # ------------------------------------------------------------------
+    # Radio and podcasts: find them, check an address works
+    # ------------------------------------------------------------------
+
+    @app.route("/api/find/<kind>")
+    def find_streams(kind):
+        term = request.args.get("q", "").strip()
+        if kind not in ("podcasts", "radio"):
+            return jsonify({"error": "Not found"}), 404
+        if len(term) < 2:
+            return jsonify({"results": []})
+        try:
+            search = streams.search_podcasts if kind == "podcasts" else streams.search_radio
+            return jsonify({"results": search(term)})
+        except (streams.StreamError, ValueError) as e:
+            return jsonify({"error": f"Searching didn't work: {e}"}), 502
+
+    @app.route("/api/streams/check", methods=["POST"])
+    def check_stream():
+        """Try an address before saving. Podcasts also return the feed's name,
+        picture and newest episode so the app can show them."""
+        body = request.get_json(silent=True) or {}
+        kind, url = body.get("kind"), (body.get("url") or "").strip()
+        try:
+            if kind == "radio":
+                return jsonify({"ok": True, **streams.check_radio(url)})
+            if kind == "podcast":
+                feed = streams.fetch_feed(url)
+                return jsonify({"ok": True, "title": feed["title"], "image": feed["image"],
+                                **streams.episode_summary(feed["episodes"])})
+            return jsonify({"error": "kind must be radio or podcast"}), 400
+        except streams.StreamError as e:
+            return jsonify({"error": f"That didn't work: {e}"}), 400
 
     @app.route("/api/disk")
     def api_disk():

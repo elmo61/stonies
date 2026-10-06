@@ -435,12 +435,12 @@ def cast_audiobook(song, config_path, config_lock, pi_ip, start_index=0, start_t
         cast.disconnect()
 
 
-def cast_song(song, config_path, config_lock, pi_ip, log_fn=None):
-    """Cast a song to the configured speaker. Raises on any failure."""
-    from urllib.parse import quote
+def cast_url(song, url, mime, config_path, config_lock, title=None, album=None,
+             live=False, start_time=0, log_fn=None):
+    """Play one address on the configured speaker. Raises on any failure.
 
-    pi_ip = _resolve_cast_ip(pi_ip, log_fn)
-
+    Used for songs (served by the box), radio streams (live) and podcast
+    episodes (straight from the podcast's own site)."""
     with config_lock:
         try:
             with open(config_path, "r") as f:
@@ -453,14 +453,14 @@ def cast_song(song, config_path, config_lock, pi_ip, log_fn=None):
         raise RuntimeError("No speaker configured")
     cast_app_id = get_cast_app_id(config)
 
-    filename = song.get("filename", "")
-    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-    mime = "audio/mp4" if ext == "m4a" else "audio/mpeg"
-    url = f"http://{pi_ip}:5000/music/{quote(filename)}"
-    msg = f"Casting track from {url}"
+    msg = f"Casting {'stream' if live else 'track'} from {url}"
     print(f"[Cast] {msg}")
     if log_fn:
         log_fn(msg)
+
+    metadata = {"metadataType": 3}      # MusicTrackMediaMetadata, as for audiobooks
+    if album:
+        metadata["albumName"] = album
 
     cast = find_cast(speaker_name)
     try:
@@ -476,15 +476,119 @@ def cast_song(song, config_path, config_lock, pi_ip, log_fn=None):
         _launch_receiver(cast, cast_app_id, log_fn)
         mc.play_media(
             url, mime,
-            title=song.get("name", ""),
+            title=title if title is not None else song.get("name", ""),
             thumb=song.get("image_url") or None,
-            # pychromecast 14 defaults to LIVE, which hides the progress bar
-            stream_type="BUFFERED",
-            metadata={"metadataType": 3},   # MusicTrackMediaMetadata, as for audiobooks
+            current_time=start_time or None,
+            # pychromecast 14 defaults to LIVE, which hides the progress bar;
+            # only radio really is live
+            stream_type="LIVE" if live else "BUFFERED",
+            metadata=metadata,
         )
         mc.block_until_active(timeout=10)
     finally:
         cast.disconnect()
+
+
+def cast_song(song, config_path, config_lock, pi_ip, log_fn=None):
+    """Cast a song to the configured speaker. Raises on any failure."""
+    from urllib.parse import quote
+
+    pi_ip = _resolve_cast_ip(pi_ip, log_fn)
+    filename = song.get("filename", "")
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    mime = "audio/mp4" if ext == "m4a" else "audio/mpeg"
+    url = f"http://{pi_ip}:5000/music/{quote(filename)}"
+    cast_url(song, url, mime, config_path, config_lock, log_fn=log_fn)
+
+
+def cast_radio(song, config_path, config_lock, log_fn=None):
+    """Play a radio station's live stream."""
+    url = song.get("stream_url", "")
+    if not url:
+        raise RuntimeError("This station has no stream address")
+    cast_url(song, url, song.get("content_type") or "audio/mpeg", config_path, config_lock,
+             live=True, log_fn=log_fn)
+
+
+def _update_song(songs_path, songs_lock, song_id, change):
+    """Apply change(song_dict) to one song in songs.json and save."""
+    with songs_lock:
+        with open(songs_path, "r") as f:
+            songs = json.load(f)
+        for s in songs:
+            if s.get("id") == song_id:
+                change(s)
+                break
+        save_json(songs_path, songs)
+
+
+def cast_podcast(song, songs_path, songs_lock, config_path, config_lock, log_fn=None):
+    """Read the podcast's feed, pick an episode (see streams.choose_episode)
+    and play it straight from the podcast's site. Raises on any failure."""
+    from streams import StreamError, get_episodes, choose_episode, episode_summary
+
+    summary = None
+    try:
+        episodes = get_episodes(song, log_fn=log_fn)
+        episode, start = choose_episode(song, episodes)
+        summary = episode_summary(episodes)
+    except StreamError as e:
+        # The feed is down or the internet is patchy: carry on with the
+        # episode in progress if there is one, the address is saved
+        prog = song.get("progress") or {}
+        if not prog.get("episode_url"):
+            raise RuntimeError(f"Couldn't load the podcast: {e}")
+        episode = {"guid": prog.get("episode_guid"), "title": prog.get("episode_title", ""),
+                   "url": prog["episode_url"], "mime": prog.get("episode_mime", "audio/mpeg")}
+        start = prog.get("current_time", 0)
+        if log_fn:
+            log_fn(f"Couldn't check the podcast feed ({e}), carrying on with \"{episode['title']}\"")
+
+    def remember(s):
+        # Saved straight away so the app and the cast monitor know which
+        # episode is on; the monitor then keeps current_time up to date
+        s["progress"] = {
+            "episode_guid": episode["guid"],
+            "episode_title": episode["title"],
+            "episode_url": episode["url"],
+            "episode_mime": episode.get("mime", "audio/mpeg"),
+            "current_time": start,
+            "updated_at": datetime.now().isoformat(timespec="seconds"),
+        }
+        if summary:
+            s["latest"] = summary
+    _update_song(songs_path, songs_lock, song["id"], remember)
+
+    if log_fn:
+        log_fn(f"Podcast episode: \"{episode['title']}\"" + (f" from {int(start // 60)} min in" if start >= 60 else ""))
+    cast_url(song, episode["url"], episode.get("mime") or "audio/mpeg", config_path, config_lock,
+             title=episode["title"], album=song.get("name"), start_time=start, log_fn=log_fn)
+
+
+def start_playback(song, songs_path, songs_lock, config_path, config_lock, pi_ip,
+                   chapter_index=None, log_fn=None):
+    """Play any library item on the configured speaker. Raises on any failure.
+
+    chapter_index: for stories, the chapter to start (from its beginning);
+    None resumes the saved place. Returns the chapter playing, or None."""
+    kind = song.get("type")
+    if kind in ("audiobook", "album"):
+        prog = song.get("progress", {})
+        if chapter_index is not None:
+            start_index, start_time = chapter_index, 0
+        else:
+            start_index = prog.get("chapter_index", 0)
+            start_time = prog.get("current_time", 0)
+        cast_audiobook(song, config_path, config_lock, pi_ip,
+                       start_index=start_index, start_time=start_time, log_fn=log_fn)
+        return start_index
+    if kind == "radio":
+        cast_radio(song, config_path, config_lock, log_fn=log_fn)
+    elif kind == "podcast":
+        cast_podcast(song, songs_path, songs_lock, config_path, config_lock, log_fn=log_fn)
+    else:
+        cast_song(song, config_path, config_lock, pi_ip, log_fn=log_fn)
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -605,20 +709,11 @@ def _daemon_iteration(state, pn532, songs_path, songs_lock, config_path,
                         state.set_playing(True)
                         def _do_cast(s=song):
                             try:
-                                if s.get("type") in ("audiobook", "album"):
-                                    prog = s.get("progress", {})
-                                    start_index = prog.get("chapter_index", 0)
-                                    cast_audiobook(
-                                        s, config_path, config_lock, pi_ip,
-                                        start_index=start_index,
-                                        start_time=prog.get("current_time", 0),
-                                        log_fn=state.add_log,
-                                    )
-                                    state.set_now_playing(s["id"], chapter_index=start_index)
-                                else:
-                                    cast_song(s, config_path, config_lock, pi_ip,
-                                              log_fn=state.add_log)
-                                    state.set_now_playing(s["id"])
+                                chapter = start_playback(
+                                    s, songs_path, songs_lock, config_path, config_lock,
+                                    pi_ip, log_fn=state.add_log,
+                                )
+                                state.set_now_playing(s["id"], chapter_index=chapter)
                                 if monitor:
                                     monitor.on_play()
                                 update_play_stats(s["id"], songs_path, songs_lock)

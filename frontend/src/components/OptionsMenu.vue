@@ -7,8 +7,9 @@
           <div class="om-head">
             <span class="display ellipsis">{{ song.name }}</span>
             <span v-if="place" class="muted">Saved place: Ch {{ place.chapter + 1 }}, {{ formatTime(place.time) }} in</span>
+            <span v-else-if="episode" class="muted ellipsis">Saved place: {{ formatTime(episode.time) }} into “{{ episode.title }}”</span>
           </div>
-          <button ref="first" class="action" @click="run(onPhone)">
+          <button v-if="!isOnline(song)" class="action" @click="run(onPhone)">
             <Icon name="phone" class="icon" /> Play on this phone
           </button>
           <button v-if="!store.nfc.hw_error" class="action" @click="run(writeSticker)">
@@ -23,9 +24,9 @@
           <button v-if="hasChapters" class="action" @click="run(editChapters)">
             <Icon name="pencil" class="icon" /> Rename {{ song.type === 'album' ? 'tracks' : 'chapters' }}
           </button>
-          <button v-if="place" class="action" @click="run(clearSavedPlace)">
+          <button v-if="place || episode" class="action" @click="run(clearSavedPlace)">
             <Icon name="restart" class="icon" />
-            <span>Start from the beginning next time<span class="hint">Forgets the saved place</span></span>
+            <span>{{ episode ? 'Start this episode again next time' : 'Start from the beginning next time' }}<span class="hint">Forgets the saved place</span></span>
           </button>
           <button class="action danger" @click="remove">
             <Icon name="trash" class="icon" />
@@ -40,13 +41,14 @@
 
 <script setup>
 import { computed, ref, watch, nextTick } from 'vue'
-import { store, songById, isStory, savedPlace, formatTime, writeSticker, renameSong, clearSavedPlace, deleteSong, playOnPhone } from '../store'
+import { store, songById, isStory, isOnline, savedPlace, episodePlace, formatTime, writeSticker, renameSong, clearSavedPlace, deleteSong, playOnPhone } from '../store'
 import Icon from './Icon.vue'
 import { chooseCover } from '../covers'
 import { lockScroll, unlockScroll } from '../scrollLock'
 
 const song = computed(() => songById(store.ui.optionsId))
 const place = computed(() => song.value ? savedPlace(song.value) : null)
+const episode = computed(() => song.value ? episodePlace(song.value) : null)
 const hasChapters = computed(() => isStory(song.value) && song.value.chapters?.length > 0)
 function editChapters(s) { store.ui.chaptersId = s.id }
 const first = ref(null)

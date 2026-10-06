@@ -4,6 +4,7 @@ import threading
 from nfc_daemon import NFCState, run_daemon, run_watchdog, get_ip
 from cast_monitor import CastMonitor
 from api import create_app
+from streams import refresh_loop
 
 
 if __name__ == "__main__":
@@ -45,6 +46,10 @@ if __name__ == "__main__":
         daemon=True,
     )
     watchdog_thread.start()
+
+    # Keeps podcast episode lists fresh so a tapped sticker doesn't wait
+    threading.Thread(target=refresh_loop, args=(songs_path, songs_lock),
+                     daemon=True, name="podcasts").start()
 
     app = create_app(state, songs_lock, config_lock, music_folder, import_folder, images_folder, songs_path, config_path, pi_ip, log_path, monitor=monitor)
     try:

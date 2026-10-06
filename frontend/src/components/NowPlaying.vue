@@ -35,7 +35,7 @@
 
 <script setup>
 import { computed, ref } from 'vue'
-import { store, songById, isStory, formatTime, stopPlayback, displayName } from '../store'
+import { store, songById, isStory, isRadio, isPodcast, formatTime, stopPlayback, displayName } from '../store'
 import Cover from './Cover.vue'
 import Icon from './Icon.vue'
 
@@ -54,7 +54,10 @@ const label = computed(() => {
 })
 const title = computed(() => (song.value ? displayName(song.value).title : store.playback.song_name) || 'Something')
 const subtitle = computed(() => {
-  if (casting.value || !isStory(song.value)) return ''
+  if (casting.value) return ''
+  if (isRadio(song.value)) return 'Live radio'
+  if (isPodcast(song.value)) return store.playback.episode_title || ''
+  if (!isStory(song.value)) return ''
   const ch = song.value.chapters[chapterIndex.value]
   return ch ? `Ch ${chapterIndex.value + 1} · ${ch.name}` : ''
 })

@@ -14,6 +14,7 @@ activity.log
 activity.log.tmp
 images/
 music_import/
+podcast_cache/
 
 # Audio files — large and personal, store locally only
 music/*

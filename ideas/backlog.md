@@ -1,5 +1,24 @@
 # Ideas Backlog
 
+## Chosen next (picked 2026-10-06)
+
+- **Status light on the box**: an RGB LED by the sticker spot that blinks when a sticker is read, when playing starts, and when something fails. Full plan and wiring: `led-status-light.md`
+- **Control stickers**: special stickers for Stop, Pause, Next chapter and Bedtime (sleep timer), so kids don't need a phone
+- **Updates that can't half-apply**: on 2026-10-06 rose pulled new code, then `pip install --upgrade` failed building `lgpio` and it never restarted. The page looked new, but the old program was still running. Plan:
+  - stop upgrading every package on each update; install only what's missing, and pin versions
+  - install and check first, then switch, and go back to the old version if the new one doesn't start
+  - show the *running* version on "Is it working?", and warn if it differs from the code on disk
+- ~~**Podcast and radio stickers**~~: built 2026-10-06 (newest or in-order episodes, radio search). Possible next steps: play on this phone, an episode list to pick from, auto-play the next episode when one finishes
+- **Speakers with screens**: make the custom receiver great on Nest Hubs, with big cover art, chapter name and progress
+- **Travel mode (Bluetooth or wired)**: the box plays the audio itself to a paired Bluetooth speaker (the Zero 2 W has Bluetooth 4.2), or to a USB audio dongle. Works with no Chromecast or Wi-Fi; pairs well with the Wi-Fi hotspot fallback. Note: Bluetooth and Wi-Fi share one radio on the Zero 2 W
+- **Remote restart / remote help**: restart or fix a box without being at the Pi (on 2026-10-06 rose needed `sudo systemctl restart stonies` typed on the box). Starts with the "Restart box button" below
+- **"What's new" in the app**: after an update, show the CHANGELOG entries since the last version
+- **Tests on GitHub**: move the backend tests into the repo, run them with GitHub Actions on every push, and fail if `dist/` wasn't rebuilt after front-end changes
+
+## Decided against (for now)
+
+Shared master library across boxes, printing sticker labels from the app, recording your own stories, blank-sticker "what should this play?" setup, story progress following you between boxes, quiet hours, weekly listening summary, library tidy-up checker, auto-filling covers and chapter names when adding.
+
 ## Next: box-side work for the new UI
 
 The redesigned UI (2026-10) shipped front-end first. These pieces need new code on the box, so they were deliberately left for later:

@@ -9,6 +9,8 @@ Responsibilities:
   - Log "finished" and "stopped" events to activity.log
   - Save audiobook position every 60 s during playback (push-driven)
   - Detect end-of-audiobook (last chapter FINISHED) and clear saved progress
+  - Podcasts: save the place in the episode, and on FINISHED remember the
+    episode as heard (so "next unplayed" moves on) and clear the place
   - Update NFCState when playback ends (naturally, cancelled, or speaker lost)
 """
 import json
@@ -227,6 +229,8 @@ class CastMonitor:
                     if song and song.get("type") == "audiobook":
                         # Clear saved progress so next play starts from the beginning
                         self._clear_progress(song_id)
+                    elif song and song.get("type") == "podcast":
+                        self._finish_episode(song_id, content_id)
 
             elif idle_reason in ("CANCELLED", "INTERRUPTED"):
                 if prev_state in ("PLAYING", "PAUSED", "BUFFERING"):
@@ -236,11 +240,14 @@ class CastMonitor:
         # Throttled position save for audiobooks while playing/paused.
         # 60 s keeps SD-card writes down; resume position is coarse anyway.
         if (player_state in ("PLAYING", "PAUSED")
-                and song and song.get("type") == "audiobook"):
+                and song and song.get("type") in ("audiobook", "podcast")):
             now = time.time()
             if now - self._last_position_save >= 60:
                 self._last_position_save = now
-                self._save_progress(song_id, song, chapter_index, current_time, content_id)
+                if song.get("type") == "podcast":
+                    self._save_episode_time(song_id, current_time, content_id)
+                else:
+                    self._save_progress(song_id, song, chapter_index, current_time, content_id)
 
     # ------------------------------------------------------------------
     # Helpers
@@ -284,6 +291,38 @@ class CastMonitor:
                 save_json(self._songs_path, songs)
             except Exception:
                 pass
+
+    def _update_song(self, song_id, change):
+        with self._songs_lock:
+            try:
+                with open(self._songs_path, "r") as f:
+                    songs = json.load(f)
+                for s in songs:
+                    if s.get("id") == song_id:
+                        change(s)
+                        break
+                save_json(self._songs_path, songs)
+            except Exception:
+                pass
+
+    def _save_episode_time(self, song_id, current_time, content_id):
+        """Keep the place in the podcast episode that's on. The episode itself
+        was recorded when it started (nfc_daemon.cast_podcast)."""
+        def change(s):
+            prog = s.get("progress") or {}
+            if prog.get("episode_url") and (not content_id or content_id == prog["episode_url"]):
+                prog["current_time"] = current_time
+                prog["updated_at"] = datetime.now().isoformat(timespec="seconds")
+                s["progress"] = prog
+        self._update_song(song_id, change)
+
+    def _finish_episode(self, song_id, content_id):
+        def change(s):
+            prog = s.get("progress") or {}
+            if prog.get("episode_guid") and (not content_id or content_id == prog.get("episode_url")):
+                s["last_finished_guid"] = prog["episode_guid"]
+                s.pop("progress", None)
+        self._update_song(song_id, change)
 
     def _save_progress(self, song_id, song, chapter_index, current_time, content_id):
         """Save audiobook position, identifying chapter from content URL if possible."""

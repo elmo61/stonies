@@ -56,7 +56,7 @@
 
 <script setup>
 import { computed, ref } from 'vue'
-import { store, play, songMeta, savedPlace, isStory, displayName } from '../store'
+import { store, play, songMeta, savedPlace, isStory, isOnline, displayName } from '../store'
 import NowPlaying from '../components/NowPlaying.vue'
 import Cover from '../components/Cover.vue'
 import Icon from '../components/Icon.vue'
@@ -65,15 +65,18 @@ const filter = ref('all')
 const query = ref('')
 
 const stories = computed(() => store.songs.filter((s) => s.type === 'audiobook'))
-const music = computed(() => store.songs.filter((s) => s.type !== 'audiobook'))
+const online = computed(() => store.songs.filter(isOnline))
+const music = computed(() => store.songs.filter((s) => s.type !== 'audiobook' && !isOnline(s)))
 const tabs = computed(() => [
   { id: 'all', label: 'All', count: store.songs.length },
   { id: 'stories', label: 'Stories', count: stories.value.length },
   { id: 'music', label: 'Songs', count: music.value.length },
+  // Only once there's a station or podcast, so the tabs don't get crowded
+  ...(online.value.length ? [{ id: 'online', label: 'Radio & podcasts', count: online.value.length }] : []),
 ])
 
 const shown = computed(() => {
-  const base = filter.value === 'stories' ? stories.value : filter.value === 'music' ? music.value : store.songs
+  const base = { stories: stories.value, music: music.value, online: online.value }[filter.value] || store.songs
   const q = query.value.trim().toLowerCase()
   if (!q) return base
   return base.filter((s) =>

@@ -32,6 +32,10 @@ export const store = reactive({
 // ---------------------------------------------------------------- helpers
 
 export const isStory = (s) => s && (s.type === 'audiobook' || s.type === 'album')
+export const isRadio = (s) => s?.type === 'radio'
+export const isPodcast = (s) => s?.type === 'podcast'
+// Radio and podcasts play from the internet, not from files on the box
+export const isOnline = (s) => isRadio(s) || isPodcast(s)
 
 export function songById(id) {
   return store.songs.find((s) => s.id === id) || null
@@ -49,6 +53,8 @@ export function formatTime(seconds) {
 export function kindLabel(song) {
   if (song.type === 'audiobook') return 'Story'
   if (song.type === 'album') return 'Album'
+  if (song.type === 'radio') return 'Radio'
+  if (song.type === 'podcast') return 'Podcast'
   return 'Song'
 }
 
@@ -57,7 +63,23 @@ export function savedPlace(song) {
   return { chapter: song.progress.chapter_index || 0, time: song.progress.current_time || 0 }
 }
 
+// Where a podcast got to: the episode on, and how far in
+export function episodePlace(song) {
+  const p = isPodcast(song) ? song.progress : null
+  if (!p || !p.episode_title) return null
+  return { title: p.episode_title, time: p.current_time || 0 }
+}
+
+export const episodeModeLabel = (song) => song.episode_mode === 'next' ? 'Episodes in order' : 'Newest episode'
+
 export function songMeta(song) {
+  if (isRadio(song)) return 'Radio · live'
+  if (isPodcast(song)) {
+    const place = episodePlace(song)
+    return place && place.time >= 60
+      ? `Podcast · ${formatTime(place.time)} into “${place.title}”`
+      : `Podcast · ${episodeModeLabel(song)}`
+  }
   if (!isStory(song)) return 'Song'
   const n = song.chapters?.length || 0
   const parts = [kindLabel(song), `${n} ${song.type === 'album' ? 'tracks' : 'chapters'}`]
@@ -280,11 +302,22 @@ export async function renameSong(song) {
   }
 }
 
+export async function setEpisodeMode(song, mode) {
+  if (song.episode_mode === mode) return
+  try {
+    await api.patch(`/songs/${song.id}`, { episode_mode: mode })
+    song.episode_mode = mode
+    toast(mode === 'next' ? 'It will play the episodes in order' : 'It will play the newest episode', 'ok')
+  } catch (e) {
+    toast(`Couldn't change it: ${e.message}`, 'error')
+  }
+}
+
 export async function clearSavedPlace(song) {
   try {
     await api.del(`/songs/${song.id}/progress`)
     delete song.progress
-    toast('It will start from the beginning next time', 'ok')
+    toast(isPodcast(song) ? 'The episode will start again next time' : 'It will start from the beginning next time', 'ok')
   } catch (e) {
     toast(`Couldn't reset: ${e.message}`, 'error')
   }
@@ -293,7 +326,9 @@ export async function clearSavedPlace(song) {
 export async function deleteSong(song) {
   const ok = await confirmDialog({
     title: `Delete “${song.name}”?`,
-    message: 'This removes it and its audio from this box. Its sticker will stop working.',
+    message: isOnline(song)
+      ? 'This removes it from this box. Its sticker will stop working.'
+      : 'This removes it and its audio from this box. Its sticker will stop working.',
     confirmLabel: 'Delete',
     danger: true,
   })

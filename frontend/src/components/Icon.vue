@@ -55,6 +55,9 @@ const paths = {
   wifiOff: '<path d="M1.5 9a15 15 0 0 1 6.3-3.6"/><path d="M12 5a15 15 0 0 1 10.5 4"/><path d="M5 12.5a10 10 0 0 1 3.5-2.1"/><path d="M15.5 10.6a10 10 0 0 1 3.5 1.9"/><path d="M8.5 16a5 5 0 0 1 7 0"/><line x1="12" y1="19.5" x2="12" y2="19.5"/><line x1="3" y1="3" x2="21" y2="21"/>',
   sync: '<polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>',
   storage: '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>',
+  radio: '<rect x="3" y="8" width="18" height="13" rx="2"/><line x1="7" y1="8" x2="17" y2="3"/><circle cx="15.5" cy="14.5" r="3"/><line x1="6.5" y1="12.5" x2="9.5" y2="12.5"/><line x1="6.5" y1="16.5" x2="9.5" y2="16.5"/>',
+  podcast: '<rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/>',
+  link: '<path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1 1"/><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1-1"/>',
   bars: '<path d="M4 10v4"/><path d="M9 6v12"/><path d="M14 8v8"/><path d="M19 11v2"/>',
 }
 </script>

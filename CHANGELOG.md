@@ -4,6 +4,20 @@ All notable changes to Stonies are documented here, newest first.
 
 ---
 
+## 2026-10-06 — Radio and podcast stickers
+
+### Added
+- **Radio stations** — add a station by searching for it by name or pasting a stream link; its sticker plays it live. The box checks the address plays first, and follows `.pls` / `.m3u` playlists to the real stream
+- **Podcasts** — add one by searching for it by name or pasting its feed link. Each podcast plays either **the newest episode** or **episodes in order** (starting from the first, moving on after each finishes), switchable from its sheet. The place in an episode is saved, like stories
+- Episodes play straight from the podcast's site, so nothing is downloaded. Episode lists are cached on the box and refreshed in the background, so taps don't wait for big feeds, and the saved list is used if a feed is down
+- A **Radio & podcasts** tab in the library, which appears once there's one to show
+- New endpoints: `GET /api/find/radio`, `GET /api/find/podcasts`, `POST /api/streams/check`; `POST /api/songs` accepts `radio` and `podcast`; `PATCH /api/songs/<id>` accepts `episode_mode`
+
+### Changed
+- Stickers and the app now start playback through one shared function (`start_playback`), so every kind of item plays the same way from either
+
+---
+
 ## 2026-10-05 — New mobile-first app
 
 A complete redesign of the web app for phones. The old screen had 324 buttons on one page, 323 of them smaller than a fingertip (under 44px), including a Delete button on every row.

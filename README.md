@@ -34,6 +34,15 @@ The web app is built for phones first: every button is at least 44px, rarely use
 - **Speaker picker** — every speaker on your Wi-Fi; stickers and the app both play on the chosen one
 - **Play on this phone** — from a song's ⋮ menu: listen in the browser with no speaker; has a scrubber and chapter skip
 
+### Radio and podcasts
+- **Radio stations** — Add → Radio station: search by name (from the free [radio-browser.info](https://www.radio-browser.info) directory) or paste a stream link. The box checks it plays (following `.pls`/`.m3u` playlists) and its sticker plays the station live
+- **Podcasts** — Add → Podcast: search by name (Apple's podcast directory) or paste the feed link. Each podcast chooses what a tap plays:
+  - **The newest episode** — for weekly shows; resumes it if it was stopped part-way
+  - **Episodes in order** — starts at the first episode, carries on where it was stopped, and moves to the next one after each finishes
+- Episodes play straight from the podcast's own site, so nothing is downloaded and the SD card doesn't fill up. Both need the internet when tapped
+- Each podcast's episode list is cached on the box (`podcast_cache/`) and refreshed every few hours, so a tap doesn't wait for a feed that can be several MB; if the feed can't be reached, the saved list is used
+- Covers come from the directory or the podcast's artwork; change them from the ⋮ menu like any other
+
 ### Stickers
 - **Write on upload** — add a story or song and write its sticker in one flow, with a full-screen "hold a sticker on the box" guide
 - **Write another copy** — any song's ⋮ menu → Write to a sticker; cancelling never deletes anything
@@ -165,6 +174,7 @@ main.py               Entry point — wires state, starts daemon + watchdog thre
 nfc_daemon.py         NFCState class + NFC read/write helpers + self-healing background loop
 api.py                Flask REST API (factory pattern via create_app())
 cast_monitor.py       Event-driven Chromecast status listener + position saver
+streams.py            Radio + podcasts: search, stream checks, feed reading and caching, episode choice
 activity_log.py       Persistent activity log helpers (size-capped)
 storage.py            Atomic JSON write helper for songs.json / config.json
 setup.sh              One-shot install script for a fresh Pi
@@ -186,6 +196,7 @@ frontend/
 music/                Audio files (gitignored — add your own)
 music_import/         Drop files here; use Scan Imports to add them (gitignored)
 songs.json            Song database (gitignored — generated at runtime)
+podcast_cache/        Cached podcast episode lists (gitignored)
 config.json           Speaker + sleep timer config (gitignored)
 ```
 
@@ -201,9 +212,12 @@ config.json           Speaker + sleep timer config (gitignored)
 | GET | `/api/config` | Get saved config (speaker, sleep timer) |
 | POST | `/api/config` | Save config |
 | GET | `/api/songs` | List all songs |
-| POST | `/api/songs` | Upload a track or audiobook (multipart) |
+| POST | `/api/songs` | Upload a track or audiobook (multipart); or add a `radio` / `podcast` (`type`, `name`, `url`, optional `image_remote`, `episode_mode`) |
+| GET | `/api/find/radio?q=` | Search radio stations by name |
+| GET | `/api/find/podcasts?q=` | Search podcasts by name |
+| POST | `/api/streams/check` | Check a station or feed address works before adding (`kind`, `url`) |
 | POST | `/api/songs/<id>/image` | Add or replace a song's cover (multipart `image`) |
-| PATCH | `/api/songs/<id>` | Rename a song (`name`) and/or its chapters (`chapter_names`, one per chapter; blank keeps the old name) |
+| PATCH | `/api/songs/<id>` | Rename a song (`name`) and/or its chapters (`chapter_names`, one per chapter; blank keeps the old name); for podcasts, `episode_mode`: `newest` or `next` |
 | DELETE | `/api/songs/<id>` | Delete a song and its files |
 | DELETE | `/api/songs/<id>/progress` | Clear saved audiobook position |
 | POST | `/api/songs/<id>/retag` | Write NFC tag for an existing song |

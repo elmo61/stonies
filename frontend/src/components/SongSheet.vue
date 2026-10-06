@@ -6,7 +6,7 @@
         <div class="ss-titles">
           <span v-if="displayName(song).series" class="ss-series">{{ displayName(song).series }}</span>
           <h2 class="display">{{ displayName(song).title }}</h2>
-          <span class="muted">{{ kindLabel(song) }}<template v-if="story"> · {{ song.chapters.length }} {{ song.type === 'album' ? 'tracks' : 'chapters' }}</template></span>
+          <span class="muted">{{ kindLabel(song) }}<template v-if="story"> · {{ song.chapters.length }} {{ song.type === 'album' ? 'tracks' : 'chapters' }}</template><template v-else-if="radio"> · live</template><template v-else-if="podcast && song.latest"> · {{ song.latest.count }} episodes</template></span>
         </div>
         <button class="icon-btn" :aria-label="`More options for ${song.name}`" @click="openOptions">
           <Icon name="more" />
@@ -19,6 +19,7 @@
           {{ mainLabel }}
         </button>
         <button v-if="place" class="btn btn-ghost btn-block" :disabled="busy" @click="playFrom(0)">Start from chapter 1</button>
+        <p v-if="episode" class="ss-episode">“{{ episode.title }}”</p>
         <div class="ss-target">
           <span>Plays on <strong>{{ targetName }}</strong></span>
           <button class="btn btn-ghost" @click="store.ui.speakerSheet = true">Change</button>
@@ -26,6 +27,16 @@
       </div>
       <h3 v-if="story" class="section-label ss-label">{{ song.type === 'album' ? 'Tracks' : 'Chapters' }} · tap one to play it</h3>
     </template>
+
+    <div v-if="podcast" class="ss-podcast">
+      <h3 class="section-label">When the sticker is tapped</h3>
+      <div role="radiogroup" aria-label="Which episode plays">
+        <button v-for="m in modes" :key="m.id" class="choice" role="radio" :aria-checked="(song.episode_mode || 'newest') === m.id ? 'true' : 'false'" @click="setEpisodeMode(song, m.id)">
+          <span class="grow"><span class="title">{{ m.label }}</span><span class="sub">{{ m.hint }}</span></span>
+        </button>
+      </div>
+      <p v-if="song.latest" class="muted ss-latest">Newest episode: “{{ song.latest.newest_title }}”</p>
+    </div>
 
     <ol v-if="story" class="chapters">
       <li v-for="(ch, i) in song.chapters" :key="ch.filename">
@@ -45,14 +56,29 @@
 
 <script setup>
 import { computed, nextTick } from 'vue'
-import { store, songById, isStory, kindLabel, savedPlace, formatTime, play, displayName } from '../store'
+import { store, songById, isStory, isRadio, isPodcast, kindLabel, savedPlace, episodePlace, formatTime, play, displayName, setEpisodeMode } from '../store'
 import BottomSheet from './BottomSheet.vue'
 import Cover from './Cover.vue'
 import Icon from './Icon.vue'
 
 const song = computed(() => songById(store.ui.songId))
 const story = computed(() => isStory(song.value))
+const radio = computed(() => isRadio(song.value))
+const podcast = computed(() => isPodcast(song.value))
 const place = computed(() => song.value ? savedPlace(song.value) : null)
+// The podcast episode a tap would carry on with. In "newest" mode an older
+// episode left part-way is skipped once a newer one is out, as on the box.
+const episode = computed(() => {
+  const s = song.value
+  const e = s ? episodePlace(s) : null
+  if (!e) return null
+  if (s.episode_mode !== 'next' && s.latest && s.latest.newest_title !== e.title) return null
+  return e
+})
+const modes = [
+  { id: 'newest', label: 'The newest episode', hint: 'Best for shows that come out every week' },
+  { id: 'next', label: 'Episodes in order', hint: 'Starts at the first episode and moves on after each one finishes' },
+]
 const busy = computed(() => store.castingId !== null)
 const playingThis = computed(() => store.playback.playing && store.playback.song_id === song.value?.id)
 
@@ -68,6 +94,11 @@ const currentLabel = computed(() => {
 })
 
 const mainLabel = computed(() => {
+  if (radio.value) return 'Play live'
+  if (podcast.value) {
+    if (episode.value) return episode.value.time >= 60 ? `Resume · ${formatTime(episode.value.time)} in` : 'Play this episode'
+    return song.value.episode_mode === 'next' ? 'Play the next episode' : 'Play the newest episode'
+  }
   if (!place.value) return story.value ? 'Play from the start' : 'Play'
   return `Resume · Ch ${place.value.chapter + 1}, ${formatTime(place.value.time)} in`
 })
@@ -102,6 +133,9 @@ function playFrom(i) { startPlaying(i) }
 .ss-target strong { color: var(--ink); }
 .ss-target .btn { padding: 0 10px; min-height: 44px; }
 .ss-label { padding: 10px 20px 4px; }
+.ss-episode { margin: 0; text-align: center; font-size: 14px; font-weight: 500; color: var(--muted); }
+.ss-podcast { padding: 6px 20px 16px; }
+.ss-latest { font-size: 14px; margin: 10px 2px 0; }
 .chapters { list-style: none; margin: 0; padding: 0 0 8px; display: flex; flex-direction: column; gap: 2px; }
 .chapter { width: 100%; min-height: 54px; padding: 6px 12px; border-radius: 14px; display: flex; align-items: center; gap: 14px; text-align: left; }
 .chapter.current { background: var(--amber-soft); }
