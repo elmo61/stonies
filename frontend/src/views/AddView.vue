@@ -82,6 +82,7 @@
 import { computed, ref, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { upload } from '../api'
+import { shrinkImage } from '../covers'
 import { store, loadSongs, openWriter, cancelWriting, toast } from '../store'
 import Icon from '../components/Icon.vue'
 
@@ -159,7 +160,10 @@ async function save(withSticker) {
   const fd = new FormData()
   fd.append('type', kind.value === 'story' ? 'audiobook' : kind.value === 'album' ? 'album' : 'track')
   fd.append('name', name.value.trim())
-  if (cover.value) fd.append('image', cover.value)
+  if (cover.value) {
+    const small = await shrinkImage(cover.value)
+    fd.append('image', small, small.name || 'cover.jpg')
+  }
   if (kind.value === 'song') {
     fd.append('file', songFile.value)
   } else {

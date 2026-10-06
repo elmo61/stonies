@@ -14,12 +14,23 @@ from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
-from nfc_daemon import cast_audiobook, cast_song, cast_receiver_mode, find_cast, lookup_song, check_and_schedule_sleep, update_play_stats
+from nfc_daemon import cast_audiobook, cast_song, cast_receiver_mode, find_cast, get_ip, lookup_song, check_and_schedule_sleep, update_play_stats
 from activity_log import write_log
 from storage import save_json
 
 
 AUDIO_EXTS = (".mp3", ".m4a")
+IMAGE_EXTS = ("jpg", "jpeg", "png", "gif", "webp")
+
+
+def image_file_from_url(url):
+    """The cover's file name from its saved URL, e.g.
+    "http://192.168.1.102:5000/images/abc123.jpg?v=17" -> "abc123.jpg".
+    None when the URL isn't one of this box's /images/ files."""
+    if not url or "/images/" not in url:
+        return None
+    name = url.rsplit("/images/", 1)[-1].split("?", 1)[0]
+    return name if name and "/" not in name and "\\" not in name and name not in (".", "..") else None
 
 # Release channels: which git branch each channel follows
 CHANNEL_BRANCHES = {"stable": "main", "beta": "beta"}
@@ -242,9 +253,8 @@ def run_sync(peer_hostname, pi_ip, songs_path, songs_lock, music_folder,
                 }
 
                 # Download cover image
-                peer_img = song.get("image_url", "")
-                if peer_img and "/images/" in peer_img:
-                    img_filename = peer_img.rsplit("/images/", 1)[-1]
+                img_filename = image_file_from_url(song.get("image_url", ""))
+                if img_filename:
                     local_img = os.path.join(images_folder, img_filename)
                     download_file(
                         f"{peer_url}/images/{url_quote(img_filename)}", local_img
@@ -578,6 +588,40 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
                 result["chapters"] = s["chapters"]
         return jsonify(result)
 
+    @app.route("/api/songs/<song_id>/image", methods=["POST"])
+    def set_song_image(song_id):
+        """Add or replace a song's cover (multipart field "image")."""
+        image_file = request.files.get("image")
+        if not image_file or not image_file.filename:
+            return jsonify({"error": "image is required"}), 400
+        ext = image_file.filename.rsplit(".", 1)[-1].lower() if "." in image_file.filename else ""
+        if ext not in IMAGE_EXTS:
+            return jsonify({"error": "Use a .jpg, .png, .gif or .webp image"}), 400
+        with songs_lock:
+            try:
+                with open(songs_path, "r") as f:
+                    songs = json.load(f)
+            except Exception as e:
+                return jsonify({"error": f"songs.json unreadable: {e}"}), 500
+            song = next((s for s in songs if s.get("id") == song_id), None)
+            if song is None:
+                return jsonify({"error": "Song not found"}), 404
+            img_filename = f"{song_id}.{ext}"
+            image_file.save(os.path.join(images_folder, img_filename))
+            old = image_file_from_url(song.get("image_url", ""))
+            if old and old != img_filename:
+                try:
+                    os.remove(os.path.join(images_folder, old))
+                except OSError:
+                    pass
+            ip = get_ip()
+            if ip == "127.0.0.1":
+                ip = pi_ip
+            # ?v= makes phones and speakers fetch the new picture, not a cached old one
+            song["image_url"] = f"http://{ip}:5000/images/{img_filename}?v={int(datetime.now().timestamp())}"
+            save_json(songs_path, songs)
+        return jsonify({"ok": True, "image_url": song["image_url"]})
+
     @app.route("/api/songs/<song_id>/progress", methods=["DELETE"])
     def clear_progress(song_id):
         with songs_lock:
@@ -621,9 +665,8 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
                 if os.path.isfile(file_path):
                     os.remove(file_path)
             # Remove associated image file if it was locally hosted
-            img_url = removed.get("image_url", "")
-            if img_url and "/images/" in img_url:
-                img_filename = img_url.rsplit("/images/", 1)[-1]
+            img_filename = image_file_from_url(removed.get("image_url", ""))
+            if img_filename:
                 img_path = os.path.join(images_folder, img_filename)
                 if os.path.isfile(img_path):
                     os.remove(img_path)

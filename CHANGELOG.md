@@ -9,6 +9,7 @@ All notable changes to Stonies are documented here, newest first.
 A complete redesign of the web app for phones. The old screen had 324 buttons on one page, 323 of them smaller than a fingertip (under 44px), including a Delete button on every row.
 
 ### Added
+- **Covers for existing songs** — ⋮ menu → Add cover / Change cover (photo or image, shrunk to 600px on the phone), backed by a new `POST /api/songs/<id>/image`. The add screen shrinks covers too. `tools/upload_covers.py` bulk-uploads a folder of pictures, matching file names to song names.
 - **New look, built for phones** — every button is at least 44px; one play button per row, and rarely used actions moved into a ⋮ menu
 - **Tap a chapter to play it** — chapters are listed by name; the playing chapter and saved place are highlighted
 - **Now playing card** — stop, plus one-tap speaker and bedtime chips

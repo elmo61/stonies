@@ -42,6 +42,7 @@ The web app is built for phones first: every button is at least 44px, rarely use
 
 ### Library management (⋮ menu and Settings)
 - **Rename** songs, and **rename chapters** from an editable list
+- **Add / change cover** — take a photo or choose an image; it's shrunk on the phone before upload. For many at once, `tools/upload_covers.py` matches a folder of pictures to song names (`--dry-run` first)
 - **Start from the beginning next time** — forgets a story's saved place
 - **Delete** — asks first
 - **Add** — Story / Album / Song, pick a folder or files, check chapter names, and take a photo of the book cover as its artwork; shows upload progress
@@ -201,6 +202,7 @@ config.json           Speaker + sleep timer config (gitignored)
 | POST | `/api/config` | Save config |
 | GET | `/api/songs` | List all songs |
 | POST | `/api/songs` | Upload a track or audiobook (multipart) |
+| POST | `/api/songs/<id>/image` | Add or replace a song's cover (multipart `image`) |
 | PATCH | `/api/songs/<id>` | Rename a song (`name`) and/or its chapters (`chapter_names`, one per chapter; blank keeps the old name) |
 | DELETE | `/api/songs/<id>` | Delete a song and its files |
 | DELETE | `/api/songs/<id>/progress` | Clear saved audiobook position |

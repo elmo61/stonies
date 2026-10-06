@@ -17,6 +17,9 @@
           <button class="action" @click="run(renameSong)">
             <Icon name="pencil" class="icon" /> Rename
           </button>
+          <button class="action" @click="run(chooseCover)">
+            <Icon name="image" class="icon" /> {{ song.image_url ? 'Change cover' : 'Add cover' }}
+          </button>
           <button v-if="hasChapters" class="action" @click="run(editChapters)">
             <Icon name="pencil" class="icon" /> Rename {{ song.type === 'album' ? 'tracks' : 'chapters' }}
           </button>
@@ -39,6 +42,7 @@
 import { computed, ref, watch, nextTick } from 'vue'
 import { store, songById, isStory, savedPlace, formatTime, writeSticker, renameSong, clearSavedPlace, deleteSong, playOnPhone } from '../store'
 import Icon from './Icon.vue'
+import { chooseCover } from '../covers'
 import { lockScroll, unlockScroll } from '../scrollLock'
 
 const song = computed(() => songById(store.ui.optionsId))
