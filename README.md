@@ -31,8 +31,8 @@ The web app is built for phones first: every button is at least 44px, rarely use
 - **Tap a chapter to play it** — the story sheet lists chapters by name; the playing chapter and saved place are highlighted, earlier ones ticked
 - **Resume** — stories pick up where they left off, whether started from a sticker or the app
 - **Now playing card** — what's playing, which chapter, a stop button, and one-tap chips for the speaker and bedtime
-- **Speaker picker** — every speaker on your Wi-Fi plus "This phone"; stickers always play on the chosen speaker
-- **Play on this phone** — listen in the browser with no speaker; has a scrubber and chapter skip
+- **Speaker picker** — every speaker on your Wi-Fi; stickers and the app both play on the chosen one
+- **Play on this phone** — from a song's ⋮ menu: listen in the browser with no speaker; has a scrubber and chapter skip
 
 ### Stickers
 - **Write on upload** — add a story or song and write its sticker in one flow, with a full-screen "hold a sticker on the box" guide

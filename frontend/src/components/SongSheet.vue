@@ -71,7 +71,7 @@ const mainLabel = computed(() => {
   if (!place.value) return story.value ? 'Play from the start' : 'Play'
   return `Resume · Ch ${place.value.chapter + 1}, ${formatTime(place.value.time)} in`
 })
-const targetName = computed(() => store.playTarget === 'phone' ? 'this phone' : (store.config.speaker || 'no speaker yet'))
+const targetName = computed(() => store.config.speaker || 'no speaker yet')
 
 function close() { store.ui.songId = null }
 function openOptions() { store.ui.optionsId = song.value.id }

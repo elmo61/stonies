@@ -6,7 +6,7 @@
     <div class="list">
       <button class="list-row" @click="store.ui.speakerSheet = true">
         <span class="grow"><span class="title">Speaker</span></span>
-        <span class="value">{{ store.playTarget === 'phone' ? 'This phone' : (store.config.speaker || 'Not chosen') }}</span>
+        <span class="value">{{ store.config.speaker || 'Not chosen' }}</span>
         <Icon name="chevronRight" :size="16" :stroke="2.4" class="chev" />
       </button>
       <button class="list-row" @click="sheet = 'cast'">

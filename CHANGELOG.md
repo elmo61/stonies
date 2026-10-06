@@ -27,6 +27,7 @@ A complete redesign of the web app for phones. The old screen had 324 buttons on
 - The Logs page is now **Activity** (`/log` redirects there)
 
 ### Fixed
+- **The speaker picker could show "This phone" selected** while a speaker was playing. "This phone" was a remembered per-phone mode that quietly made every play button play on the phone. It's gone: the picker only chooses the box's speaker (used by stickers and the app), and phones forget any saved choice. To listen on a phone, use a song's ⋮ menu → Play on this phone.
 - **Long titles were cut off on phones** — 24 titles start "Ladybird Audio Adventures - …", so every one showed as "Ladybird Audio Adven…". When several titles share a "Series - Name" start, rows now show the distinctive part as the title (cover initials too), with the series at the end of the small line. Titles can also use two lines before being shortened.
 - **Two ✕ buttons in the search box** — the browser's own clear button is hidden; ours stays.
 - **Playing from a story left the sheet open** over the now-playing card. Play, Resume and tapping a chapter now close the sheet and scroll to the top, where the card shows "Starting on…" and then what's playing.

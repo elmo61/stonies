@@ -16,17 +16,9 @@
         </span>
         <span class="radio-dot"></span>
       </button>
-      <button class="choice" role="radio" :aria-checked="store.playTarget === 'phone' ? 'true' : 'false'" @click="choosePhone">
-        <span class="badge"><Icon name="phone" :size="20" /></span>
-        <span class="grow">
-          <span class="title">This phone</span>
-          <span class="sub">Listen here, no speaker needed</span>
-        </span>
-        <span class="radio-dot"></span>
-      </button>
     </div>
     <p v-if="!scanning && speakers.length === 0" class="muted sp-note">No speakers found. Check they're switched on and on the same Wi-Fi, then scan again.</p>
-    <p class="muted sp-note">Stickers always play on the chosen speaker. “This phone” only affects this phone.</p>
+    <p class="muted sp-note">Stickers and the app both play on the chosen speaker. To listen on this phone instead, use a song's <strong>⋮</strong> menu → <strong>Play on this phone</strong>.</p>
 
     <button class="btn btn-primary btn-lg btn-block" @click="close">Done</button>
   </BottomSheet>
@@ -35,7 +27,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { api } from '../api'
-import { store, saveConfig, setPlayTarget, toast } from '../store'
+import { store, saveConfig, toast } from '../store'
 import BottomSheet from './BottomSheet.vue'
 import Icon from './Icon.vue'
 
@@ -51,7 +43,7 @@ const options = computed(() => {
 })
 
 function isChosen(name) {
-  return store.playTarget !== 'phone' && store.config.speaker === name
+  return store.config.speaker === name
 }
 
 function noteFor(name) {
@@ -73,7 +65,6 @@ async function scan() {
 }
 
 async function choose(name) {
-  setPlayTarget('speaker')
   if (store.config.speaker === name) return
   saving.value = true
   try {
@@ -84,10 +75,6 @@ async function choose(name) {
   } finally {
     saving.value = false
   }
-}
-
-function choosePhone() {
-  setPlayTarget('phone')
 }
 
 function close() { store.ui.speakerSheet = false }

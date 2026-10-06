@@ -3,12 +3,9 @@
 import { reactive, computed } from 'vue'
 import { api, connection } from './api'
 
-function loadPref(key, fallback) {
-  try { return localStorage.getItem(key) ?? fallback } catch (_) { return fallback }
-}
-function savePref(key, value) {
-  try { localStorage.setItem(key, value) } catch (_) {}
-}
+// Earlier builds remembered "This phone" per phone, silently making every play
+// button play on the phone. That mode is gone; forget any saved choice.
+try { localStorage.removeItem('stonies.playTarget') } catch (_) {}
 
 export const store = reactive({
   songs: [],
@@ -17,7 +14,6 @@ export const store = reactive({
   nfc: {},                    // /api/nfc/status
   playback: { playing: false },
   hostname: '',
-  playTarget: loadPref('stonies.playTarget', 'speaker'),   // 'speaker' | 'phone' (per phone)
   local: null,                // on-phone playback: { song, chapter, time }
   installPrompt: null,        // browser's install prompt, when it offers one (https only)
   castingId: null,            // song currently being sent to the speaker
@@ -134,7 +130,7 @@ export const health = computed(() => {
   const n = store.nfc
   if (n.hw_error) return { level: 'warn', label: 'Needs a look' }
   if (n.nfc_heartbeat_age != null && n.nfc_heartbeat_age > 15) return { level: 'warn', label: 'Needs a look' }
-  if (store.config && store.songsLoaded && !store.config.speaker && store.playTarget !== 'phone') {
+  if (store.config && store.songsLoaded && !store.config.speaker) {
     return { level: 'warn', label: 'No speaker' }
   }
   if (n.offline) return { level: 'quiet', label: 'Quiet mode' }
@@ -227,23 +223,13 @@ export async function startApp() {
 
 // ---------------------------------------------------------------- playback
 
-export function setPlayTarget(target) {
-  store.playTarget = target
-  savePref('stonies.playTarget', target)
-}
-
 export function playOnPhone(song, chapter, time = 0) {
   store.local = { song, chapter: chapter ?? 0, time, at: Date.now() }
 }
 
-// Play a song or a chapter wherever this phone is set to play
+// Play a song or a chapter on the box's speaker
+// (to listen on the phone instead: ⋮ menu → Play on this phone → playOnPhone)
 export async function play(song, chapterIndex = null) {
-  if (store.playTarget === 'phone') {
-    const place = savedPlace(song)
-    if (chapterIndex != null) playOnPhone(song, chapterIndex, 0)
-    else playOnPhone(song, place?.chapter ?? 0, place?.time ?? 0)
-    return
-  }
   if (store.nfc.offline) {
     toast('Quiet mode is on, so nothing plays. Turn it off in Settings.', 'error')
     return
