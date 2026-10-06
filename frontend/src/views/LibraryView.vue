@@ -36,8 +36,9 @@
         <button class="open" @click="store.ui.songId = song.id">
           <Cover :song="song" :size="52" />
           <span class="text">
+            <span v-if="displayName(song).series" class="series ellipsis">{{ displayName(song).series }}</span>
             <span class="name">{{ displayName(song).title }}</span>
-            <span class="meta ellipsis">{{ metaLine(song) }}</span>
+            <span class="meta ellipsis">{{ isPlaying(song) ? 'Playing now' : songMeta(song) }}</span>
             <span v-if="progressPct(song) !== null" class="bar"><span :style="{ width: progressPct(song) + '%' }"></span></span>
           </span>
         </button>
@@ -79,13 +80,6 @@ const shown = computed(() => {
     s.name.toLowerCase().includes(q) ||
     (s.chapters || []).some((c) => (c.name || '').toLowerCase().includes(q)))
 })
-
-function metaLine(song) {
-  const series = displayName(song).series
-  const rest = isPlaying(song) ? 'Playing now' : songMeta(song)
-  // Series last, so a narrow screen cuts it rather than the saved place
-  return series ? `${rest} · ${series}` : rest
-}
 
 function isPlaying(song) {
   return store.playback.playing && store.playback.song_id === song.id

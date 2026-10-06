@@ -82,10 +82,11 @@ export function coverColor(id) {
 }
 
 // "Ladybird Audio Adventures - Natural Wonders of the World" → series + title.
+// Also "Ladybird   Outer Space": a run of spaces where a file name's dash was removed.
 // Only split when several songs share the series, so a one-off title with a
 // dash in it stays whole.
 function splitTitle(name) {
-  const m = /\s[-–—]\s|:\s/.exec(name || '')
+  const m = /\s[-–—]\s|:\s|\s{2,}/.exec(name || '')
   if (!m || m.index < 3) return null
   const series = name.slice(0, m.index).trim()
   const title = name.slice(m.index + m[0].length).trim()
