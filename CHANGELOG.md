@@ -27,6 +27,8 @@ A complete redesign of the web app for phones. The old screen had 324 buttons on
 - The Logs page is now **Activity** (`/log` redirects there)
 
 ### Fixed
+- **Long titles were cut off on phones** — 24 titles start "Ladybird Audio Adventures - …", so every one showed as "Ladybird Audio Adven…". When several titles share a "Series - Name" start, rows now show the distinctive part as the title (cover initials too), with the series at the end of the small line. Titles can also use two lines before being shortened.
+- **Two ✕ buttons in the search box** — the browser's own clear button is hidden; ours stays.
 - **Playing from a story left the sheet open** over the now-playing card. Play, Resume and tapping a chapter now close the sheet and scroll to the top, where the card shows "Starting on…" and then what's playing.
 - **Sheets hid under the phone's address bar** — the story sheet was sized with `vh`, which ignores a showing address bar, so its top slid underneath. Sheets now fit the visible screen (`dvh`), the page behind stays still while a sheet is open (so the bar stops popping in and out), and you can swipe a sheet down by its handle or title to close it.
 - **Cancelling a sticker write deleted the song and its audio**, including existing songs being re-written. Cancel now only stops writing; the song always stays.

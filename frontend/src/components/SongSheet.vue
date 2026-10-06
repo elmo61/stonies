@@ -4,7 +4,8 @@
       <div class="ss-head">
         <Cover :song="song" :size="88" />
         <div class="ss-titles">
-          <h2 class="display">{{ song.name }}</h2>
+          <span v-if="displayName(song).series" class="ss-series">{{ displayName(song).series }}</span>
+          <h2 class="display">{{ displayName(song).title }}</h2>
           <span class="muted">{{ kindLabel(song) }}<template v-if="story"> · {{ song.chapters.length }} {{ song.type === 'album' ? 'tracks' : 'chapters' }}</template></span>
         </div>
         <button class="icon-btn" :aria-label="`More options for ${song.name}`" @click="openOptions">
@@ -44,7 +45,7 @@
 
 <script setup>
 import { computed, nextTick } from 'vue'
-import { store, songById, isStory, kindLabel, savedPlace, formatTime, play } from '../store'
+import { store, songById, isStory, kindLabel, savedPlace, formatTime, play, displayName } from '../store'
 import BottomSheet from './BottomSheet.vue'
 import Cover from './Cover.vue'
 import Icon from './Icon.vue'
@@ -95,6 +96,7 @@ function playFrom(i) { startPlaying(i) }
 .ss-head { display: flex; gap: 14px; align-items: flex-start; padding: 14px 10px 0 20px; }
 .ss-titles { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; padding-top: 4px; }
 .ss-titles h2 { font-size: 21px; line-height: 1.2; }
+.ss-series { font-size: 13px; font-weight: 700; color: var(--muted); margin-bottom: -2px; }
 .ss-actions { display: flex; flex-direction: column; gap: 6px; padding: 16px 20px 0; }
 .ss-target { display: flex; align-items: center; justify-content: space-between; font-size: 14px; color: var(--muted); }
 .ss-target strong { color: var(--ink); }

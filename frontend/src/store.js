@@ -85,6 +85,32 @@ export function coverColor(id) {
   return COVER_COLORS[h % COVER_COLORS.length]
 }
 
+// "Ladybird Audio Adventures - Natural Wonders of the World" → series + title.
+// Only split when several songs share the series, so a one-off title with a
+// dash in it stays whole.
+function splitTitle(name) {
+  const m = /\s[-–—]\s|:\s/.exec(name || '')
+  if (!m || m.index < 3) return null
+  const series = name.slice(0, m.index).trim()
+  const title = name.slice(m.index + m[0].length).trim()
+  return series && title ? { series, title } : null
+}
+
+const seriesNames = computed(() => {
+  const counts = new Map()
+  for (const s of store.songs) {
+    const split = splitTitle(s.name)
+    if (split) counts.set(split.series, (counts.get(split.series) || 0) + 1)
+  }
+  return new Set([...counts].filter(([, n]) => n >= 2).map(([series]) => series))
+})
+
+export function displayName(song) {
+  const split = splitTitle(song?.name)
+  if (split && seriesNames.value.has(split.series)) return split
+  return { series: '', title: song?.name || '' }
+}
+
 // Covers are saved with the box's full http address (e.g. http://192.168.1.102:5000/images/x.jpg).
 // Load them from wherever the app was opened instead: an https page can't load
 // http images, and the box's address may have changed since the upload.
