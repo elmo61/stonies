@@ -10,14 +10,16 @@
 
     <div class="pp-main">
       <button class="pp-info" :disabled="!story" :aria-expanded="story ? String(expanded) : undefined" @click="expanded = !expanded">
-        <span class="pp-kicker">On this phone</span>
+        <span class="pp-kicker">{{ loading ? 'Finding the episode…' : 'On this phone' }}</span>
         <span class="pp-title ellipsis">{{ song.name }}</span>
         <span v-if="story" class="pp-sub ellipsis">Ch {{ chapter + 1 }} · {{ song.chapters[chapter]?.name }}</span>
+        <span v-else-if="live" class="pp-sub">Live radio</span>
+        <span v-else-if="episodeTitle" class="pp-sub ellipsis">{{ episodeTitle }}</span>
       </button>
       <button v-if="story" class="icon-btn pp-btn" aria-label="Previous chapter" :disabled="chapter === 0" @click="startAudio(chapter - 1, 0)">
         <Icon name="back" :size="20" :stroke="2.4" />
       </button>
-      <button class="icon-btn pp-btn pp-toggle" :aria-label="paused ? 'Play' : 'Pause'" @click="togglePause">
+      <button class="icon-btn pp-btn pp-toggle" :aria-label="paused ? 'Play' : 'Pause'" :disabled="loading" @click="togglePause">
         <Icon :name="paused ? 'play' : 'pause'" :size="22" />
       </button>
       <button v-if="story" class="icon-btn pp-btn" aria-label="Next chapter" :disabled="chapter >= song.chapters.length - 1" @click="startAudio(chapter + 1, 0)">
@@ -28,7 +30,7 @@
       </button>
     </div>
 
-    <div class="pp-scrub">
+    <div v-if="!live" class="pp-scrub">
       <span>{{ formatTime(current) }}</span>
       <input type="range" min="0" :max="duration || 100" step="1" :value="current" aria-label="Position" @input="seek($event.target.value)" />
       <span>{{ duration ? formatTime(duration) : '' }}</span>
@@ -38,12 +40,16 @@
 
 <script setup>
 import { computed, ref, watch, onUnmounted } from 'vue'
-import { audioUrl } from '../api'
-import { store, isStory, formatTime } from '../store'
+import { api, audioUrl } from '../api'
+import { store, isStory, isRadio, isPodcast, formatTime, toast } from '../store'
 import Icon from './Icon.vue'
 
 const song = computed(() => store.local?.song)
 const story = computed(() => isStory(song.value))
+const live = computed(() => isRadio(song.value))       // no position to scrub in live radio
+const episodeTitle = ref('')
+const loading = ref(false)
+let request = 0                                        // ignores answers to an older play request
 const chapter = ref(0)
 const current = ref(0)
 const duration = ref(null)
@@ -59,7 +65,8 @@ function teardown() {
   audio = null
 }
 
-function startAudio(index, startTime = 0) {
+// src: an address to play instead of the box's own file (a radio stream or podcast episode)
+function startAudio(index, startTime = 0, src = null) {
   teardown()
   const s = song.value
   if (!s) return
@@ -68,7 +75,7 @@ function startAudio(index, startTime = 0) {
   duration.value = null
   paused.value = false
   expanded.value = false
-  audio = new Audio(audioUrl(s, index))
+  audio = new Audio(src || audioUrl(s, index))
   audio.onloadedmetadata = () => {
     duration.value = isFinite(audio.duration) ? audio.duration : null
     if (startTime > 0) audio.currentTime = startTime
@@ -78,7 +85,10 @@ function startAudio(index, startTime = 0) {
     if (story.value && chapter.value < s.chapters.length - 1) startAudio(chapter.value + 1, 0)
     else stop()
   }
-  audio.onerror = () => stop()
+  audio.onerror = () => {
+    if (src) toast(live.value ? "That station won't play on this phone right now" : "That episode won't play on this phone right now", 'error')
+    stop()
+  }
   audio.play().catch(() => { paused.value = true })
 }
 
@@ -95,10 +105,35 @@ function stop() {
   store.local = null
 }
 
+// Radio plays its stream. For a podcast the box picks the episode, as it would
+// for a sticker (newest, or next in order) and says where to start; nothing is
+// sent to the speaker and the saved place isn't changed.
+async function begin(req) {
+  const id = ++request
+  const s = req.song
+  episodeTitle.value = ''
+  if (isRadio(s)) return startAudio(0, 0, s.stream_url)
+  if (!isPodcast(s)) return startAudio(req.chapter ?? 0, req.time ?? 0)
+  teardown()
+  loading.value = true
+  try {
+    const ep = await api.get(`/songs/${s.id}/episode`)
+    if (id !== request) return
+    episodeTitle.value = ep.title
+    startAudio(0, ep.start_time || 0, ep.url)
+  } catch (e) {
+    if (id !== request) return
+    toast(`Couldn't play it here: ${e.message}`, 'error')
+    stop()
+  } finally {
+    if (id === request) loading.value = false
+  }
+}
+
 // A new play request (different song, or the same one again) restarts playback
 watch(() => store.local, (req) => {
-  if (req) startAudio(req.chapter ?? 0, req.time ?? 0)
-  else teardown()
+  if (req) begin(req)
+  else { request++; loading.value = false; teardown() }
 }, { immediate: true })
 
 onUnmounted(teardown)

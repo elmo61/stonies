@@ -42,6 +42,7 @@ The web app is built for phones first: every button is at least 44px, rarely use
 - Episodes play straight from the podcast's own site, so nothing is downloaded and the SD card doesn't fill up. Both need the internet when tapped
 - Each podcast's episode list is cached on the box (`podcast_cache/`) and refreshed every few hours, so a tap doesn't wait for a feed that can be several MB; if the feed can't be reached, the saved list is used
 - Covers come from the directory or the podcast's artwork; change them from the ⋮ menu like any other
+- **Play on this phone** works for both: a station plays live; for a podcast the box picks the episode just as a sticker would and the phone plays it (the speaker isn't used and the saved place isn't changed)
 
 ### Stickers
 - **Write on upload** — add a story or song and write its sticker in one flow, with a full-screen "hold a sticker on the box" guide
@@ -213,6 +214,7 @@ config.json           Speaker + sleep timer config (gitignored)
 | POST | `/api/config` | Save config |
 | GET | `/api/songs` | List all songs |
 | POST | `/api/songs` | Upload a track or audiobook (multipart); or add a `radio` / `podcast` (`type`, `name`, `url`, optional `image_remote`, `episode_mode`) |
+| GET | `/api/songs/<id>/episode` | The podcast episode a tap would play and where to start, for playing on a phone (read-only) |
 | GET | `/api/find/radio?q=` | Search radio stations by name |
 | GET | `/api/find/podcasts?q=` | Search podcasts by name |
 | POST | `/api/streams/check` | Check a station or feed address works before adding (`kind`, `url`) |

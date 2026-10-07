@@ -674,6 +674,29 @@ def create_app(state, songs_lock, config_lock, music_folder, import_folder, imag
             save_json(songs_path, songs)
         return jsonify({"ok": True, "image_url": song["image_url"]})
 
+    @app.route("/api/songs/<song_id>/episode")
+    def song_episode(song_id):
+        """The podcast episode a tap would play, and where in it, for playing
+        on a phone. Read-only: nothing is cast and the saved place is unchanged."""
+        song = lookup_song(song_id, songs_path, songs_lock)
+        if not song:
+            return jsonify({"error": "Song not found"}), 404
+        if song.get("type") != "podcast":
+            return jsonify({"error": "Only podcasts have episodes"}), 400
+        try:
+            episode, start = streams.choose_episode(song, streams.get_episodes(song, log_fn=state.add_log))
+        except streams.StreamError as e:
+            # Feed unreachable and nothing cached: the episode in progress still plays
+            prog = song.get("progress") or {}
+            if not prog.get("episode_url"):
+                return jsonify({"error": f"Couldn't load the podcast: {e}"}), 502
+            episode = {"guid": prog.get("episode_guid"), "title": prog.get("episode_title", ""),
+                       "url": prog["episode_url"], "mime": prog.get("episode_mime", "audio/mpeg")}
+            start = prog.get("current_time", 0)
+        return jsonify({"guid": episode.get("guid"), "title": episode.get("title", ""), "url": episode["url"],
+                        "mime": episode.get("mime", "audio/mpeg"), "duration": episode.get("duration"),
+                        "start_time": start})
+
     @app.route("/api/songs/<song_id>/progress", methods=["DELETE"])
     def clear_progress(song_id):
         with songs_lock:

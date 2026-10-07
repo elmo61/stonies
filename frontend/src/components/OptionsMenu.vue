@@ -9,7 +9,7 @@
             <span v-if="place" class="muted">Saved place: Ch {{ place.chapter + 1 }}, {{ formatTime(place.time) }} in</span>
             <span v-else-if="episode" class="muted ellipsis">Saved place: {{ formatTime(episode.time) }} into “{{ episode.title }}”</span>
           </div>
-          <button v-if="!isOnline(song)" class="action" @click="run(onPhone)">
+          <button ref="first" class="action" @click="run(onPhone)">
             <Icon name="phone" class="icon" /> Play on this phone
           </button>
           <button v-if="!store.nfc.hw_error" class="action" @click="run(writeSticker)">
@@ -41,7 +41,7 @@
 
 <script setup>
 import { computed, ref, watch, nextTick } from 'vue'
-import { store, songById, isStory, isOnline, savedPlace, episodePlace, formatTime, writeSticker, renameSong, clearSavedPlace, deleteSong, playOnPhone } from '../store'
+import { store, songById, isStory, savedPlace, episodePlace, formatTime, writeSticker, renameSong, clearSavedPlace, deleteSong, playOnPhone } from '../store'
 import Icon from './Icon.vue'
 import { chooseCover } from '../covers'
 import { lockScroll, unlockScroll } from '../scrollLock'
