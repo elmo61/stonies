@@ -7,4 +7,6 @@ waitress
 pychromecast>=13,<15
 RPi.GPIO
 adafruit-blinka
+# newer adafruit-blinka releases need gpiod on the Pi but don't install it
+gpiod
 adafruit-circuitpython-pn532
